@@ -151,6 +151,12 @@ class handler(BaseHTTPRequestHandler):
                         <code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /stok_durumu</code>
                         <p style="font-size: 14px; color: #aaa;">Hangi uygulamada hangi ülkeden kaç numara olduğunu gösterir.</p>
                     </div>
+
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="color: #3498db;">5. Ham Kodları Göster</h4>
+                        <code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /kod_cek</code>
+                        <p style="font-size: 14px; color: #aaa;">Kaynak API'ye düşen tüm kodları ham veri olarak listeler (Son 50).</p>
+                    </div>
                 </div>
                 
                 <p style="text-align: center; margin-top: 30px; font-size: 12px; color: #555;">Yxce OTP API © 2026</p>
@@ -326,7 +332,18 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"durum": "basarili", "verilen_adet": count, "numaralar": [s['number'] for s in selected_stocks]}, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
-        # ==================== 9. 404 ====================
+        # ==================== 9. KOD ÇEK (HAM VERİ) ====================
+        if path == '/kod_cek':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.end_headers()
+            codes = fetch_source_codes()
+            # Son 50 kodu göster
+            son_kodlar = codes[:50] if isinstance(codes, list) else []
+            self.wfile.write(json.dumps(son_kodlar, ensure_ascii=False, indent=4).encode('utf-8'))
+            return
+
+        # ==================== 10. 404 ====================
         self.send_response(404); self.send_header('Content-type', 'application/json'); self.end_headers()
         self.wfile.write(json.dumps({"mesaj": "Gecersiz endpoint"}).encode('utf-8'))
         return
