@@ -8,34 +8,37 @@ from datetime import datetime, timedelta
 import os
 import traceback
 
-# Upstash Redis için doğrudan REST API kullanımı (Kütüphane çökmesini engeller)
-def redis_komut(*args):
-    url = os.environ.get("KV_REST_API_URL")
-    token = os.environ.get("KV_REST_API_TOKEN")
-    if not url or not token:
-        raise Exception("Vercel'de KV_REST_API_URL veya KV_REST_API_TOKEN ortam değişkenleri eksik!")
+# Değişken isimlerini esnek yapan ve URL'yi temizleyen fonksiyon
+def get_kv_creds():
+    url = os.environ.get("KV_REST_API_URL") or os.environ.get("STORAGE_REST_API_URL") or os.environ.get("UPSTASH_REDIS_REST_URL")
+    token = os.environ.get("KV_REST_API_TOKEN") or os.environ.get("STORAGE_REST_API_TOKEN") or os.environ.get("UPSTASH_REDIS_REST_TOKEN")
     
-    data = json.dumps(args).encode('utf-8')
-    req = urllib.request.Request(url, data=data, headers={
-        'Authorization': f'Bearer {token}',
-        'Content-Type': 'application/json'
-    })
-    with urllib.request.urlopen(req) as response:
-        return json.loads(response.read().decode('utf-8')).get('result')
+    if url: url = url.strip().rstrip('/') # Sondaki / işaretini ve boşlukları sil
+    if token: token = token.strip()
+    return url, token
 
-def get_formatted_stocks():
-    keys = redis_komut("KEYS", "stok:*") or []
-    grouped = {}
-    for k in keys:
-        val = redis_komut("GET", k)
-        if val:
-            data = json.loads(val)
-            app = data.get('platform', 'Bilinmeyen')
-            country = data.get('country', 'Bilinmeyen')
-            if app not in grouped: grouped[app] = {}
-            if country not in grouped[app]: grouped[app][country] = 0
-            grouped[app][country] += 1
-    return grouped
+# Upstash Redis Bağlantısı (Sıfır Kütüphane, Saf HTTP)
+def redis_req(*args):
+    url, token = get_kv_creds()
+    
+    if not url or not token:
+        return {"error": "Vercel'de Redis bağlantı değişkenleri EKSİK!"}
+    
+    try:
+        data = json.dumps(args).encode('utf-8')
+        req = urllib.request.Request(url, data=data, headers={
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        })
+        with urllib.request.urlopen(req, timeout=5) as response:
+            res = json.loads(response.read().decode('utf-8'))
+            if 'error' in res: return {"error": f"Redis Hatası: {res['error']}"}
+            return res.get('result')
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode('utf-8')
+        return {"error": f"Upstash Bağlantı Hatası (400): {err_body}"}
+    except Exception as e:
+        return {"error": f"Bağlantı Hatası: {str(e)}"}
 
 # Admin Şifresi
 ADMIN_KEY = "ziyapurna1010"
@@ -91,18 +94,26 @@ def numara_ulke_bul(numara):
             return ULKE_KODLARI[prefix]
     return "Bilinmeyen Ülke"
 
-def fetch_source_codes():
-    try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        req = urllib.request.Request("http://194.238.28.236:8000/container", headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
-            data = response.read().decode('utf-8')
-            parsed_data = json.loads(data)
-            return parsed_data if isinstance(parsed_data, list) else []
-    except Exception:
-        return []
+def get_formatted_stocks():
+    keys = redis_req("KEYS", "stok:*")
+    if isinstance(keys, dict) and "error" in keys: return keys 
+    
+    grouped = {}
+    if not keys: return grouped
+    
+    for k in keys:
+        val = redis_req("GET", k)
+        if val and not (isinstance(val, dict) and "error" in val):
+            try:
+                data = json.loads(val)
+                app = data.get('platform', 'Bilinmeyen')
+                country = data.get('country', 'Bilinmeyen')
+                if app not in grouped: grouped[app] = {}
+                if country not in grouped[app]: grouped[app][country] = 0
+                grouped[app][country] += 1
+            except:
+                pass
+    return grouped
 
 class handler(BaseHTTPRequestHandler):
     def end_headers(self):
@@ -117,25 +128,25 @@ class handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
-            self._handle_request()
+            self._handle_get()
         except Exception as e:
             self.send_response(500)
             self.send_header('Content-type', 'text/html; charset=utf-8')
             self.end_headers()
             error_trace = traceback.format_exc()
-            self.wfile.write(f"<h1>Kritik Hata!</h1><p>{str(e)}</p><pre style='background:#eee;padding:10px;'>{error_trace}</pre>".encode('utf-8'))
+            self.wfile.write(f"<h2>Hata Oluştu!</h2><p>{str(e)}</p><pre style='background:#eee;padding:10px;'>{error_trace}</pre>".encode('utf-8'))
 
     def do_POST(self):
         try:
-            self._handle_post_request()
+            self._handle_post()
         except Exception as e:
             self.send_response(500)
             self.send_header('Content-type', 'text/html; charset=utf-8')
             self.end_headers()
             error_trace = traceback.format_exc()
-            self.wfile.write(f"<h1>Kritik Hata!</h1><p>{str(e)}</p><pre style='background:#eee;padding:10px;'>{error_trace}</pre>".encode('utf-8'))
+            self.wfile.write(f"<h2>Hata Oluştu!</h2><p>{str(e)}</p><pre style='background:#eee;padding:10px;'>{error_trace}</pre>".encode('utf-8'))
 
-    def _handle_request(self):
+    def _handle_get(self):
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
         query = urllib.parse.parse_qs(parsed_path.query)
@@ -226,6 +237,9 @@ class handler(BaseHTTPRequestHandler):
             islem = query.get('islem', [''])[0]
             if islem == "listele":
                 stocks = get_formatted_stocks()
+                if isinstance(stocks, dict) and "error" in stocks:
+                    self.wfile.write(f"<h2 style='color:red;'>Sistem Hatası!</h2><p>{stocks['error']}</p>".encode('utf-8'))
+                    return
                 html = f"<h2>📋 Stok Listesi</h2><ul>"
                 for app, countries in stocks.items():
                     html += f"<li><b>{app}</b><ul>"
@@ -235,8 +249,10 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(html.encode('utf-8'))
                 return
             elif islem == "sil":
-                keys = redis_komut("KEYS", "stok:*") or []
-                for k in keys: redis_komut("DEL", k)
+                keys = redis_req("KEYS", "stok:*")
+                if isinstance(keys, dict) and "error" in keys:
+                    self.wfile.write(f"<h2 style='color:red;'>Hata: {keys['error']}</h2>".encode('utf-8')); return
+                for k in keys: redis_req("DEL", k)
                 self.wfile.write(f"<h2>🗑️ Tüm Stoklar Silindi!</h2><br><a href='/admin?key={key}' style='color: #3498db;'>🔙 Geri Dön</a>".encode('utf-8'))
                 return
             elif islem == "ekle_sayfa":
@@ -275,11 +291,13 @@ class handler(BaseHTTPRequestHandler):
             if count > 20: count = 20
             if not app or not country:
                 self.wfile.write(json.dumps({"hata": "Uygulama ve ülke belirtmelisiniz."}, ensure_ascii=False).encode('utf-8')); return
-            keys = redis_komut("KEYS", "stok:*") or []
+            keys = redis_req("KEYS", "stok:*")
+            if isinstance(keys, dict) and "error" in keys:
+                self.wfile.write(json.dumps(keys, ensure_ascii=False).encode('utf-8')); return
             matching_keys = []
             for k in keys:
-                val = redis_komut("GET", k)
-                if val:
+                val = redis_req("GET", k)
+                if val and not (isinstance(val, dict) and "error" in val):
                     data = json.loads(val)
                     if data.get('platform', '').lower() == app.lower() and data.get('country', '').lower() == country.lower():
                         matching_keys.append(k)
@@ -289,11 +307,11 @@ class handler(BaseHTTPRequestHandler):
             selected_keys = matching_keys[:count]
             numaralar = []
             for k in selected_keys:
-                val = redis_komut("GET", k)
-                if val:
+                val = redis_req("GET", k)
+                if val and not (isinstance(val, dict) and "error" in val):
                     data = json.loads(val)
                     numaralar.append(data['number'])
-                    redis_komut("DEL", k)
+                    redis_req("DEL", k)
             self.wfile.write(json.dumps({"durum": "basarili", "verilen_adet": count, "numaralar": numaralar}, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
@@ -308,10 +326,9 @@ class handler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps({"mesaj": "Gecersiz endpoint"}).encode('utf-8'))
         return
 
-    def _handle_post_request(self):
+    def _handle_post(self):
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
-        
         if path == '/dosya_yukle_islem':
             content_length = int(self.headers.get('Content-Length', 0))
             boundary = self.headers.get('Content-Type', '').split("=")[-1].encode()
@@ -338,8 +355,10 @@ class handler(BaseHTTPRequestHandler):
                 eklenen = 0
                 for num in valid_nums:
                     ulke = numara_ulke_bul(num)
-                    stok_id = redis_komut("INCR", "stok_sayaci")
-                    redis_komut("SET", f"stok:{stok_id}", json.dumps({"id": stok_id, "number": num, "platform": app_name, "country": ulke}))
+                    stok_id = redis_req("INCR", "stok_sayaci")
+                    if isinstance(stok_id, dict) and "error" in stok_id:
+                        self.wfile.write(f"<h2 style='color:red;'>Hata: {stok_id['error']}</h2>".encode('utf-8')); return
+                    redis_req("SET", f"stok:{stok_id}", json.dumps({"id": stok_id, "number": num, "platform": app_name, "country": ulke}))
                     eklenen += 1
                 self.wfile.write(f"<h2 style='color:green;'>✅ {eklenen} numara eklendi.</h2><br><a href='/admin?key={ADMIN_KEY}'>🔙 Geri Dön</a>".encode('utf-8'))
             else:
