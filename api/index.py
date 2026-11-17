@@ -153,9 +153,7 @@ def fetch_source_codes_2():
         return []
 
 def clean_code_item(item):
-    """API'den gelen karışık veriyi standart bir sözlüğe çevirir."""
     if isinstance(item, dict):
-        # Direkt sözlükse
         if 'number' in item and ('otp' in item or 'code' in item):
             return {
                 'number': item.get('number'),
@@ -167,19 +165,15 @@ def clean_code_item(item):
             }
         return None
     elif isinstance(item, list) and len(item) >= 2:
-        # Liste içindeki listeyse (örn: ["number", "code", "service"...])
         try:
             num = str(item[0])
             otp = str(item[1])
             platform = str(item[2]) if len(item) > 2 else 'Bilinmeyen'
             time_str = str(item[3]) if len(item) > 3 else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            # Tarih formatı geçerli mi kontrol et
             try:
                 datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
             except:
                 time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                
             return {
                 'number': num,
                 'otp': otp,
@@ -202,7 +196,6 @@ def get_all_codes():
         if cleaned:
             all_codes.append(cleaned)
     
-    # Tarihe göre sırala (en yeni en üstte)
     def sort_key(x):
         try:
             return datetime.strptime(x.get('time', ''), "%Y-%m-%d %H:%M:%S")
@@ -215,15 +208,12 @@ def get_all_codes():
 def get_formatted_stocks():
     keys = get_all_stock_keys()
     if isinstance(keys, dict) and "error" in keys: return keys 
-    
     grouped = {}
     if not keys: return grouped
-    
     chunk_size = 500
     for i in range(0, len(keys), chunk_size):
         chunk_keys = keys[i:i+chunk_size]
         vals = redis_req("MGET", *chunk_keys)
-        
         if vals and isinstance(vals, list):
             for val in vals:
                 if val:
@@ -301,23 +291,25 @@ class handler(BaseHTTPRequestHandler):
         if path == '/live_trafik':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
             codes = get_all_codes()
-            simdi = datetime.now()
-            bes_dakika_once = simdi - timedelta(minutes=5)
+            
+            # Sadece en son düşen 100 kodu al (trafik için yeterli)
+            codes = codes[:100]
+            
             trafik_sayaci = {}
             for item in codes:
-                zaman_str = item.get('time')
-                if not zaman_str: continue
-                try:
-                    item_zaman = datetime.strptime(zaman_str, "%Y-%m-%d %H:%M:%S")
-                    if item_zaman >= bes_dakika_once:
-                        platform = str(item.get('platform', 'Bilinmeyen')).capitalize()
-                        ulke = numara_ulke_bul(item.get('number', ''))
-                        key_str = f"{ulke} {platform}"
-                        if key_str not in trafik_sayaci: trafik_sayaci[key_str] = 0
-                        trafik_sayaci[key_str] += 1
-                except Exception: continue
-            sirali_trafik = dict(sorted(trafik_sayaci.items(), key=lambda x: x[1], reverse=True))
-            self.wfile.write(json.dumps({"son_5_dakika_trafik": sirali_trafik}, ensure_ascii=False, indent=4).encode('utf-8'))
+                platform = str(item.get('platform', 'Bilinmeyen')).capitalize()
+                ulke = numara_ulke_bul(item.get('number', ''))
+                
+                if ulke == "Bilinmeyen Ülke": continue # Bilinmeyenleri atla
+                
+                key_str = f"{ulke} - {platform}"
+                if key_str not in trafik_sayaci: trafik_sayaci[key_str] = 0
+                trafik_sayaci[key_str] += 1
+            
+            # Sırala ve sadece ilk 5 tanesini al
+            sirali_trafik = dict(sorted(trafik_sayaci.items(), key=lambda x: x[1], reverse=True)[:5])
+            
+            self.wfile.write(json.dumps({"en_aktif_5_trafik": sirali_trafik}, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
         if path == '/kod_sorgula':
