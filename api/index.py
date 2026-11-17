@@ -26,7 +26,7 @@ def redis_req(*args):
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'
         })
-        with urllib.request.urlopen(req, timeout=5) as response:
+        with urllib.request.urlopen(req, timeout=10) as response:
             res = json.loads(response.read().decode('utf-8'))
             if 'error' in res: return {"error": f"Redis Hatası: {res['error']}"}
             return res.get('result')
@@ -36,12 +36,12 @@ def redis_req(*args):
     except Exception as e:
         return {"error": f"Bağlantı Hatası: {str(e)}"}
 
-# SCAN ile stok anahtarlarını güvenli çekme fonksiyonu
 def get_all_stock_keys():
     keys = []
     cursor = "0"
     while True:
-        res = redis_req("SCAN", cursor, "MATCH", "stok:*", "COUNT", "1000")
+        # COUNT değerini 5000 yaparak çok daha hızlı taramasını sağladık
+        res = redis_req("SCAN", cursor, "MATCH", "stok:*", "COUNT", "5000")
         if isinstance(res, dict) and "error" in res:
             return res
         if not res or len(res) < 2:
@@ -125,18 +125,24 @@ def get_formatted_stocks():
     grouped = {}
     if not keys: return grouped
     
-    for k in keys:
-        val = redis_req("GET", k)
-        if val and not (isinstance(val, dict) and "error" in val):
-            try:
-                data = json.loads(val)
-                app = data.get('platform', 'Bilinmeyen')
-                country = data.get('country', 'Bilinmeyen')
-                if app not in grouped: grouped[app] = {}
-                if country not in grouped[app]: grouped[app][country] = 0
-                grouped[app][country] += 1
-            except:
-                pass
+    # MGET kullanarak tek seferde 100'lük gruplar halinde verileri çekiyoruz (Çok daha hızlı)
+    chunk_size = 100
+    for i in range(0, len(keys), chunk_size):
+        chunk_keys = keys[i:i+chunk_size]
+        vals = redis_req("MGET", *chunk_keys)
+        
+        if vals and isinstance(vals, list):
+            for val in vals:
+                if val:
+                    try:
+                        data = json.loads(val)
+                        app = data.get('platform', 'Bilinmeyen')
+                        country = data.get('country', 'Bilinmeyen')
+                        if app not in grouped: grouped[app] = {}
+                        if country not in grouped[app]: grouped[app][country] = 0
+                        grouped[app][country] += 1
+                    except:
+                        pass
     return grouped
 
 class handler(BaseHTTPRequestHandler):
@@ -318,24 +324,34 @@ class handler(BaseHTTPRequestHandler):
             keys = get_all_stock_keys()
             if isinstance(keys, dict) and "error" in keys:
                 self.wfile.write(json.dumps(keys, ensure_ascii=False).encode('utf-8')); return
+            
             matching_keys = []
-            for k in keys:
-                val = redis_req("GET", k)
-                if val and not (isinstance(val, dict) and "error" in val):
-                    data = json.loads(val)
-                    if data.get('platform', '').lower() == app.lower() and data.get('country', '').lower() == country.lower():
-                        matching_keys.append(k)
+            chunk_size = 100
+            for i in range(0, len(keys), chunk_size):
+                chunk_keys = keys[i:i+chunk_size]
+                vals = redis_req("MGET", *chunk_keys)
+                if vals and isinstance(vals, list):
+                    for idx, val in enumerate(vals):
+                        if val:
+                            data = json.loads(val)
+                            if data.get('platform', '').lower() == app.lower() and data.get('country', '').lower() == country.lower():
+                                matching_keys.append(chunk_keys[idx])
+
             if not matching_keys:
                 self.wfile.write(json.dumps({"hata": "Stok bulunamadı."}, ensure_ascii=False).encode('utf-8')); return
             if len(matching_keys) < count: count = len(matching_keys)
             selected_keys = matching_keys[:count]
+            
+            # Silinecek numaraları MGET ile tek seferde çek
+            selected_vals = redis_req("MGET", *selected_keys)
             numaralar = []
-            for k in selected_keys:
-                val = redis_req("GET", k)
-                if val and not (isinstance(val, dict) and "error" in val):
-                    data = json.loads(val)
-                    numaralar.append(data['number'])
-                    redis_req("DEL", k)
+            if selected_vals and isinstance(selected_vals, list):
+                for val in selected_vals:
+                    if val:
+                        data = json.loads(val)
+                        numaralar.append(data['number'])
+                        redis_req("DEL", selected_keys[numaralar.index(data['number'])]) # anahtarı sil
+
             self.wfile.write(json.dumps({"durum": "basarili", "verilen_adet": count, "numaralar": numaralar}, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
