@@ -5,13 +5,17 @@ import re
 import urllib.request
 import ssl
 from datetime import datetime, timedelta
+from upstash_redis import Redis
+import os
 
 # Admin Şifresi
 ADMIN_KEY = "ziyapurna1010"
 
-# Geçici Hafıza
-STOKLAR = []
-STOK_SAYACI = 0
+# Vercel KV Bağlantısı
+redis = Redis(
+    url=os.environ.get("KV_REST_API_URL"),
+    token=os.environ.get("KV_REST_API_TOKEN")
+)
 
 UYGULAMALAR = ["WhatsApp", "Facebook", "Instagram", "Telegram", "Bip", "Twitter", "TikTok", "Discord", "Google"]
 
@@ -67,13 +71,17 @@ def numara_ulke_bul(numara):
     return "Bilinmeyen Ülke"
 
 def get_formatted_stocks():
+    keys = redis.keys("stok:*")
     grouped = {}
-    for data in STOKLAR:
-        app = data.get('platform', 'Bilinmeyen')
-        country = data.get('country', 'Bilinmeyen')
-        if app not in grouped: grouped[app] = {}
-        if country not in grouped[app]: grouped[app][country] = 0
-        grouped[app][country] += 1
+    for k in keys:
+        val = redis.get(k)
+        if val:
+            data = json.loads(val)
+            app = data.get('platform', 'Bilinmeyen')
+            country = data.get('country', 'Bilinmeyen')
+            if app not in grouped: grouped[app] = {}
+            if country not in grouped[app]: grouped[app][country] = 0
+            grouped[app][country] += 1
     return grouped
 
 def fetch_source_codes():
@@ -104,7 +112,6 @@ class handler(BaseHTTPRequestHandler):
         self.do_GET()
 
     def do_GET(self):
-        global STOKLAR, STOK_SAYACI
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
         query = urllib.parse.parse_qs(parsed_path.query)
@@ -246,7 +253,8 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(html.encode('utf-8'))
                 return
             elif islem == "sil":
-                STOKLAR.clear()
+                keys = redis.keys("stok:*")
+                for k in keys: redis.delete(k)
                 self.wfile.write(f"<h2>🗑️ Tüm Stoklar Silindi!</h2><br><a href='/admin?key={key}' style='color: #3498db;'>🔙 Geri Dön</a>".encode('utf-8'))
                 return
             elif islem == "ekle_sayfa":
@@ -295,8 +303,8 @@ class handler(BaseHTTPRequestHandler):
                 eklenen = 0
                 for num in valid_nums:
                     ulke = numara_ulke_bul(num)
-                    STOK_SAYACI += 1
-                    STOKLAR.append({"id": STOK_SAYACI, "number": num, "platform": app_name, "country": ulke})
+                    stok_id = int(redis.incr("stok_sayaci"))
+                    redis.set(f"stok:{stok_id}", json.dumps({"id": stok_id, "number": num, "platform": app_name, "country": ulke}))
                     eklenen += 1
                 self.send_response(200)
                 self.send_header('Content-type', 'text/html; charset=utf-8')
@@ -323,13 +331,30 @@ class handler(BaseHTTPRequestHandler):
             if count > 20: count = 20
             if not app or not country:
                 self.wfile.write(json.dumps({"hata": "Uygulama ve ülke belirtmelisiniz."}, ensure_ascii=False).encode('utf-8')); return
-            matching_stocks = [s for s in STOKLAR if s['platform'].lower() == app.lower() and s['country'].lower() == country.lower()]
-            if not matching_stocks:
+
+            keys = redis.keys("stok:*")
+            matching_keys = []
+            for k in keys:
+                val = redis.get(k)
+                if val:
+                    data = json.loads(val)
+                    if data.get('platform', '').lower() == app.lower() and data.get('country', '').lower() == country.lower():
+                        matching_keys.append(k)
+
+            if not matching_keys:
                 self.wfile.write(json.dumps({"hata": "Stok bulunamadı."}, ensure_ascii=False).encode('utf-8')); return
-            if len(matching_stocks) < count: count = len(matching_stocks)
-            selected_stocks = matching_stocks[:count]
-            for stock in selected_stocks: STOKLAR.remove(stock)
-            self.wfile.write(json.dumps({"durum": "basarili", "verilen_adet": count, "numaralar": [s['number'] for s in selected_stocks]}, ensure_ascii=False, indent=4).encode('utf-8'))
+            if len(matching_keys) < count: count = len(matching_keys)
+            
+            selected_keys = matching_keys[:count]
+            numaralar = []
+            for k in selected_keys:
+                val = redis.get(k)
+                if val:
+                    data = json.loads(val)
+                    numaralar.append(data['number'])
+                    redis.delete(k)
+
+            self.wfile.write(json.dumps({"durum": "basarili", "verilen_adet": count, "numaralar": numaralar}, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
         # ==================== 9. KOD ÇEK (HAM VERİ) ====================
