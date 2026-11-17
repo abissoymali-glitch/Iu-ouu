@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 # Admin Şifresi
 ADMIN_KEY = "ziyapurna1010"
 
-# Geçici Hafıza (Adminin manuel eklediği stoklar)
+# Geçici Hafıza
 STOKLAR = []
 STOK_SAYACI = 0
 
@@ -153,9 +153,9 @@ class handler(BaseHTTPRequestHandler):
                     </div>
 
                     <div style="margin-bottom: 20px;">
-                        <h4 style="color: #3498db;">5. Ham Kodları Göster</h4>
+                        <h4 style="color: #3498db;">5. En Son Düşen 50 Kod</h4>
                         <code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /kod_cek</code>
-                        <p style="font-size: 14px; color: #aaa;">Kaynak API'ye düşen tüm kodları ham veri olarak listeler (Son 50).</p>
+                        <p style="font-size: 14px; color: #aaa;">Sisteme gelen en son 50 kodun ham verilerini listeler.</p>
                     </div>
                 </div>
                 
@@ -338,7 +338,6 @@ class handler(BaseHTTPRequestHandler):
             self.send_header('Content-type', 'application/json; charset=utf-8')
             self.end_headers()
             codes = fetch_source_codes()
-            # Son 50 kodu göster
             son_kodlar = codes[:50] if isinstance(codes, list) else []
             self.wfile.write(json.dumps(son_kodlar, ensure_ascii=False, indent=4).encode('utf-8'))
             return
