@@ -154,8 +154,8 @@ class handler(BaseHTTPRequestHandler):
                     
                     <div style="margin-bottom: 20px;">
                         <h4 style="color: #e74c3c;">5. Admin Paneli (Gizli)</h4>
-                        <code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /admin?key=ziyapurna1010</code>
-                        <p style="font-size: 14px; color: #aaa;">Stok ekleme, silme ve listeleme işlemleri (Sadece yetkili).</p>
+                        <code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /admin</code>
+                        <p style="font-size: 14px; color: #aaa;">Stok ekleme, silme ve listeleme işlemleri (Sadece yetkili kişiler girebilir).</p>
                     </div>
                 </div>
                 
