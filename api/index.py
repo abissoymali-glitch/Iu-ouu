@@ -69,7 +69,6 @@ def get_all_stock_keys():
 
 ADMIN_KEY = "ziyapurna1010"
 UYGULAMALAR = ["WhatsApp", "Facebook", "Instagram", "Telegram", "Bip", "Twitter", "TikTok", "Discord", "Google"]
-
 API_URL_2 = "https://numberpanel.tech/api/otp?count=200"
 
 ULKE_KODLARI = {
@@ -186,8 +185,55 @@ def clean_code_item(item):
             return None
     return None
 
-def get_all_codes():
-    # İki API'yi aynı anda (paralel) çekerek hızlandırıyoruz
+def save_codes_to_redis(codes):
+    commands = []
+    for item in codes:
+        # Her kodun tekil bir anahtarı olsun (Numara + OTP + Zaman)
+        key = f"canli_kod:{item['number']}:{item['otp']}:{item['time']}"
+        commands.append(["SET", key, json.dumps(item), "EX", 3600]) # 1 saat sonra silinsin
+    if commands:
+        redis_pipeline(commands)
+
+def get_cached_codes_from_redis():
+    keys = []
+    cursor = "0"
+    while True:
+        res = redis_req("SCAN", cursor, "MATCH", "canli_kod:*", "COUNT", "10000")
+        if isinstance(res, dict) and "error" in res:
+            return []
+        if not res or len(res) < 2:
+            break
+        cursor = str(res[0])
+        keys.extend(res[1])
+        if cursor == "0":
+            break
+            
+    if not keys:
+        return []
+        
+    all_codes = []
+    chunk_size = 500
+    for i in range(0, len(keys), chunk_size):
+        chunk_keys = keys[i:i+chunk_size]
+        vals = redis_req("MGET", *chunk_keys)
+        if vals and isinstance(vals, list):
+            for val in vals:
+                if val:
+                    try:
+                        all_codes.append(json.loads(val))
+                    except:
+                        pass
+                        
+    def sort_key(x):
+        try:
+            return datetime.strptime(x.get('time', ''), "%Y-%m-%d %H:%M:%S")
+        except:
+            return datetime.min
+    all_codes.sort(key=sort_key, reverse=True)
+    
+    return all_codes
+
+def fetch_and_cache_codes():
     codes1 = []
     codes2 = []
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -204,13 +250,9 @@ def get_all_codes():
         if cleaned:
             all_codes.append(cleaned)
     
-    def sort_key(x):
-        try:
-            return datetime.strptime(x.get('time', ''), "%Y-%m-%d %H:%M:%S")
-        except:
-            return datetime.min
-    all_codes.sort(key=sort_key, reverse=True)
-    
+    if all_codes:
+        save_codes_to_redis(all_codes)
+        
     return all_codes
 
 def get_formatted_stocks():
@@ -241,7 +283,7 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0') # Yenilenmeme sorununu çözer
+        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
         super().end_headers()
 
     def do_OPTIONS(self):
@@ -274,7 +316,6 @@ class handler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed_path.query)
         key = query.get('key', [''])[0]
 
-        # API Kullanım Sayacı (Sadece ana sayfa ve kod çekme sayılsın, admin sayılmasın)
         if path not in ['/favicon.ico', '/admin', '/admin_islem']:
             redis_req("INCR", "api_kullanim_sayaci")
 
@@ -303,8 +344,13 @@ class handler(BaseHTTPRequestHandler):
 
         if path == '/live_trafik':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
-            codes = get_all_codes()
-            codes = codes[:100] # Son 100 kod
+            
+            # Canlı trafik için API'den yeni verileri çek ve cache'e kaydet
+            fetch_and_cache_codes()
+            
+            # Cache'den hızlıca oku
+            codes = get_cached_codes_from_redis()
+            codes = codes[:100]
             
             trafik_sayaci = {}
             for item in codes:
@@ -333,9 +379,11 @@ class handler(BaseHTTPRequestHandler):
             if len(numaralar) > 10:
                 self.wfile.write(json.dumps({"hata": "Aynı anda en fazla 10 numara sorgulanabilir."}, ensure_ascii=False).encode('utf-8')); return
 
-            codes = get_all_codes()
-            bulunan_kodlar = {}
+            # Sorgulama yaparken de arkada yeni kodları çekelim ki güncel kalsın
+            fetch_and_cache_codes()
+            codes = get_cached_codes_from_redis()
             
+            bulunan_kodlar = {}
             for item in codes:
                 num = re.sub(r"\D", "", str(item.get('number', '')))
                 if num in numaralar and num not in bulunan_kodlar:
@@ -355,7 +403,6 @@ class handler(BaseHTTPRequestHandler):
             self.send_response(200); self.send_header('Content-type', 'text/html; charset=utf-8'); self.end_headers()
             if key != ADMIN_KEY: self.wfile.write("<h1>Yetkisiz Erişim</h1>".encode('utf-8')); return
             
-            # Kullanım sayısını çek
             kullanim_sayisi = redis_req("GET", "api_kullanim_sayaci") or 0
             
             html = f"""
@@ -480,8 +527,14 @@ class handler(BaseHTTPRequestHandler):
 
         if path == '/kod_cek':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
-            codes = get_all_codes()
+            
+            # API'lerden yeni verileri çek ve Redis'e kaydet
+            fetch_and_cache_codes()
+            
+            # Redis'ten anında oku ve göster (Süper hızlı)
+            codes = get_cached_codes_from_redis()
             son_kodlar = codes[:50]
+            
             self.wfile.write(json.dumps(son_kodlar, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
