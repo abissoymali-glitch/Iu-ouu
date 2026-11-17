@@ -151,12 +151,6 @@ class handler(BaseHTTPRequestHandler):
                         <code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /stok_durumu</code>
                         <p style="font-size: 14px; color: #aaa;">Hangi uygulamada hangi ülkeden kaç numara olduğunu gösterir.</p>
                     </div>
-                    
-                    <div style="margin-bottom: 20px;">
-                        <h4 style="color: #e74c3c;">5. Admin Paneli (Gizli)</h4>
-                        <code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /admin</code>
-                        <p style="font-size: 14px; color: #aaa;">Stok ekleme, silme ve listeleme işlemleri (Sadece yetkili kişiler girebilir).</p>
-                    </div>
                 </div>
                 
                 <p style="text-align: center; margin-top: 30px; font-size: 12px; color: #555;">Yxce OTP API © 2026</p>
