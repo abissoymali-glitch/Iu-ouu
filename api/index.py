@@ -6,12 +6,10 @@ import re
 # Admin Şifresi
 ADMIN_KEY = "ziyapurna1010"
 
-# Verileri geçici hafızada (RAM'de) tutuyoruz
-# Format: {"id": 1, "platform": "WhatsApp", "country": "Rusya", "number": "905551234567"}
+# Geçici Hafıza
 STOKLAR = []
 STOK_SAYACI = 0
 
-# Uygulamalar ve Ülkeler
 UYGULAMALAR = ["WhatsApp", "Facebook", "Instagram", "Telegram", "Bip", "Twitter", "TikTok", "Discord", "Google"]
 ULKELER = ["Türkiye", "Rusya", "ABD", "Almanya", "Fransa", "İngiltere", "Hindistan", "Brezilya", "Endonezya", "Nijerya", "Mısır", "Pakistan", "Bangladeş", "Meksika"]
 
@@ -44,6 +42,13 @@ class handler(BaseHTTPRequestHandler):
         path = parsed_path.path
         query = urllib.parse.parse_qs(parsed_path.query)
         key = query.get('key', [''])[0]
+
+        # FAVICON HATASINI ÇÖZÜMÜ (Tarayıcı isteklerini engelle)
+        if path == '/favicon.ico':
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/x-icon')
+            self.end_headers()
+            return
 
         # ==================== 1. ADMIN PANELİ ====================
         if path == '/admin':
@@ -186,7 +191,6 @@ class handler(BaseHTTPRequestHandler):
 
             selected_stocks = matching_stocks[:count]
             
-            # Seçilenleri stoktan sil
             for stock in selected_stocks:
                 STOKLAR.remove(stock)
                 
@@ -197,5 +201,9 @@ class handler(BaseHTTPRequestHandler):
             }, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
+        # Tanımsız bir yol gelirse hata vermek yerine boş dön
+        self.send_response(404)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
         self.wfile.write(json.dumps({"mesaj": "Gecersiz endpoint"}).encode('utf-8'))
         return
