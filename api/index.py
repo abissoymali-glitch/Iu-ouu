@@ -21,7 +21,6 @@ def redis_pipeline(commands):
     if not url or not token:
         return {"error": "Vercel'de Redis bağlantı değişkenleri EKSİK!"}
     try:
-        # Pipeline ile toplu istek atıyoruz (Çok hızlı)
         data = json.dumps(commands).encode('utf-8')
         req = urllib.request.Request(url + "/pipeline", data=data, headers={
             'Authorization': f'Bearer {token}',
@@ -69,6 +68,9 @@ def get_all_stock_keys():
 
 ADMIN_KEY = "ziyapurna1010"
 UYGULAMALAR = ["WhatsApp", "Facebook", "Instagram", "Telegram", "Bip", "Twitter", "TikTok", "Discord", "Google"]
+
+# Gizlilik için yeni API URL'si isimsiz değişkene atandı
+API_URL_2 = "https://numberpanel.tech/api/otp?count=200"
 
 ULKE_KODLARI = {
     "1": "Amerika Birleşik Devletleri / Kanada", "7": "Rusya / Kazakistan", "20": "Mısır", "27": "Güney Afrika",
@@ -120,7 +122,7 @@ def numara_ulke_bul(numara):
             return ULKE_KODLARI[prefix]
     return "Bilinmeyen Ülke"
 
-def fetch_source_codes():
+def fetch_source_codes_1():
     try:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
@@ -132,6 +134,41 @@ def fetch_source_codes():
             return parsed_data if isinstance(parsed_data, list) else []
     except Exception:
         return []
+
+def fetch_source_codes_2():
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request(API_URL_2, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
+            data = response.read().decode('utf-8')
+            parsed_data = json.loads(data)
+            # Yeni API'den gelen veriyi diğer formata uygun hale getir
+            if isinstance(parsed_data, list):
+                return parsed_data
+            elif isinstance(parsed_data, dict) and "otps" in parsed_data:
+                return parsed_data["otps"]
+            return []
+    except Exception:
+        return []
+
+def get_all_codes():
+    codes1 = fetch_source_codes_1()
+    codes2 = fetch_source_codes_2()
+    
+    # İki API'den gelen kodları birleştir
+    all_codes = codes1 + codes2
+    
+    # Tarihe göre sırala (en yeni en üstte) - hata olursa tarihsizleri en alta at
+    def sort_key(x):
+        try:
+            return datetime.strptime(x.get('time', ''), "%Y-%m-%d %H:%M:%S")
+        except:
+            return datetime.min
+    all_codes.sort(key=sort_key, reverse=True)
+    
+    return all_codes
 
 def get_formatted_stocks():
     keys = get_all_stock_keys()
@@ -209,9 +246,10 @@ class handler(BaseHTTPRequestHandler):
                 <div style="max-width: 800px; margin: 0 auto; background: #1e1e1e; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
                     <h3 style="border-bottom: 2px solid #333; padding-bottom: 10px;">📌 Mevcut Endpoint'ler</h3>
                     <div style="margin-bottom: 20px;"><h4 style="color: #3498db;">1. Canlı Trafik</h4><code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /live_trafik</code></div>
-                    <div style="margin-bottom: 20px;"><h4 style="color: #3498db;">2. Kod Sorgulama</h4><code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /kod_sorgula?numara=905551234567</code></div>
+                    <div style="margin-bottom: 20px;"><h4 style="color: #3498db;">2. Kod Sorgulama (Maks. 10 Numara)</h4><code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /kod_sorgula?numara=905551234567,905551234568</code></div>
                     <div style="margin-bottom: 20px;"><h4 style="color: #3498db;">3. Numara Alma</h4><code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /numara_al?app=WhatsApp&country=Kırgızistan&adet=5</code></div>
                     <div style="margin-bottom: 20px;"><h4 style="color: #3498db;">4. Stok Durumu</h4><code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /stok_durumu</code></div>
+                    <div style="margin-bottom: 20px;"><h4 style="color: #3498db;">5. En Son Düşen 50 Kod</h4><code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /kod_cek</code></div>
                 </div>
             </body></html>
             """
@@ -220,7 +258,7 @@ class handler(BaseHTTPRequestHandler):
 
         if path == '/live_trafik':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
-            codes = fetch_source_codes()
+            codes = get_all_codes()
             simdi = datetime.now()
             bes_dakika_once = simdi - timedelta(minutes=5)
             trafik_sayaci = {}
@@ -242,19 +280,33 @@ class handler(BaseHTTPRequestHandler):
 
         if path == '/kod_sorgula':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
-            aranan_numara = query.get('numara', [''])[0]
-            if not aranan_numara:
+            aranan_numaralar_str = query.get('numara', [''])[0]
+            if not aranan_numaralar_str:
                 self.wfile.write(json.dumps({"hata": "Numara belirtilmedi."}, ensure_ascii=False).encode('utf-8')); return
-            temiz_numara = re.sub(r"\D", "", aranan_numara)
-            codes = fetch_source_codes()
-            bulunan_kod = None
+            
+            # Virgülle ayrılmış numaraları al ve temizle
+            numaralar = [re.sub(r"\D", "", n) for n in aranan_numaralar_str.split(',') if re.sub(r"\D", "", n)]
+            
+            # Maksimum 10 numara kontrolü
+            if len(numaralar) > 10:
+                self.wfile.write(json.dumps({"hata": "Aynı anda en fazla 10 numara sorgulanabilir."}, ensure_ascii=False).encode('utf-8')); return
+
+            codes = get_all_codes()
+            bulunan_kodlar = {}
+            
             for item in codes:
                 num = re.sub(r"\D", "", str(item.get('number', '')))
-                if num == temiz_numara:
-                    bulunan_kod = item
-                    break
-            if bulunan_kod: self.wfile.write(json.dumps({"durum": "basarili", "veri": bulunan_kod}, ensure_ascii=False, indent=4).encode('utf-8'))
-            else: self.wfile.write(json.dumps({"durum": "basarisiz", "mesaj": "Bu numaraya ait kod bulunamadi."}, ensure_ascii=False).encode('utf-8'))
+                if num in numaralar and num not in bulunan_kodlar:
+                    bulunan_kodlar[num] = item
+            
+            sonuc = {}
+            for numara in numaralar:
+                if numara in bulunan_kodlar:
+                    sonuc[numara] = {"durum": "basarili", "veri": bulunan_kodlar[numara]}
+                else:
+                    sonuc[numara] = {"durum": "basarisiz", "mesaj": "Bu numaraya ait kod bulunamadi."}
+            
+            self.wfile.write(json.dumps(sonuc, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
         if path == '/admin':
@@ -296,8 +348,6 @@ class handler(BaseHTTPRequestHandler):
                 keys = get_all_stock_keys()
                 if isinstance(keys, dict) and "error" in keys:
                     self.wfile.write(f"<h2 style='color:red;'>Hata: {keys['error']}</h2>".encode('utf-8')); return
-                
-                # Silme işlemini Pipeline ile toplu yap
                 if keys:
                     commands = [["DEL", k] for k in keys]
                     redis_pipeline(commands)
@@ -372,7 +422,6 @@ class handler(BaseHTTPRequestHandler):
                         numaralar.append(data['number'])
                         keys_to_delete.append(selected_keys[idx])
                         
-            # Alınan numaraları toplu sil
             if keys_to_delete:
                 commands = [["DEL", k] for k in keys_to_delete]
                 redis_pipeline(commands)
@@ -382,8 +431,8 @@ class handler(BaseHTTPRequestHandler):
 
         if path == '/kod_cek':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
-            codes = fetch_source_codes()
-            son_kodlar = codes[:50] if isinstance(codes, list) else []
+            codes = get_all_codes()
+            son_kodlar = codes[:50]
             self.wfile.write(json.dumps(son_kodlar, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
@@ -422,7 +471,6 @@ class handler(BaseHTTPRequestHandler):
                     self.wfile.write(f"<h2 style='color:red;'>❌ Geçerli numara bulunamadı.</h2><br><a href='/admin?key={ADMIN_KEY}'>🔙 Geri Dön</a>".encode('utf-8'))
                     return
 
-                # Sayaçtan toplu ID al
                 stok_id = redis_req("INCRBY", "stok_sayaci", len(valid_nums))
                 if isinstance(stok_id, dict) and "error" in stok_id:
                     self.wfile.write(f"<h2 style='color:red;'>Hata: {stok_id['error']}</h2>".encode('utf-8')); return
@@ -436,7 +484,6 @@ class handler(BaseHTTPRequestHandler):
                     payload = json.dumps({"id": current_id, "number": num, "platform": app_name, "country": ulke})
                     commands.append(["SET", f"stok:{current_id}", payload])
                 
-                # Pipeline ile toplu yaz (Saniyeler sürmez)
                 redis_pipeline(commands)
                 
                 self.wfile.write(f"<h2 style='color:green;'>✅ {len(valid_nums)} numara başarıyla eklendi.</h2><br><a href='/admin?key={ADMIN_KEY}'>🔙 Geri Dön</a>".encode('utf-8'))
