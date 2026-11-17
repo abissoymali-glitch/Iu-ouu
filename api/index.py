@@ -8,7 +8,7 @@ import ssl
 # Admin Şifresi
 ADMIN_KEY = "ziyapurna1010"
 
-# Geçici Hafıza (RAM'de tutulur)
+# Geçici Hafıza
 STOKLAR = []
 STOK_SAYACI = 0
 
@@ -45,7 +45,7 @@ class handler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed_path.query)
         key = query.get('key', [''])[0]
 
-        # FAVICON HATASINI ÇÖZÜMÜ
+        # FAVICON
         if path == '/favicon.ico':
             self.send_response(200)
             self.send_header('Content-Type', 'image/x-icon')
@@ -151,7 +151,7 @@ class handler(BaseHTTPRequestHandler):
                 return
             return
 
-        # STOK DURUMU (Herkese Açık)
+        # STOK DURUMU
         if path == '/stok_durumu':
             self.send_response(200)
             self.send_header('Content-type', 'application/json; charset=utf-8')
@@ -183,28 +183,30 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"durum": "basarili", "verilen_adet": count, "numaralar": [s['number'] for s in selected_stocks]}, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
-        # OTOMATİK KOD ÇEKME
+        # ==================== 5. OTOMATİK KOD ÇEKME (Sadece Gösterim) ====================
         if path == '/kod_cek':
             self.send_response(200)
             self.send_header('Content-type', 'application/json; charset=utf-8')
             self.end_headers()
+
             try:
                 ctx = ssl.create_default_context()
                 ctx.check_hostname = False
                 ctx.verify_mode = ssl.CERT_NONE
-                req = urllib.request.Request("http://194.238.28.236:8000/container", headers={'User-Agent': 'Mozilla/5.0'})
+                
+                req = urllib.request.Request(
+                    "http://194.238.28.236:8000/container",
+                    headers={'User-Agent': 'Mozilla/5.0'}
+                )
+                
                 with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
                     data = response.read().decode('utf-8')
                     parsed_data = json.loads(data)
-                    new_added = 0
+                    
                     if isinstance(parsed_data, list):
-                        for item in parsed_data:
-                            exists = any(s.get('number') == item.get('number') and s.get('otp') == item.get('otp') for s in STOKLAR)
-                            if not exists:
-                                STOK_SAYACI += 1
-                                STOKLAR.append({"id": STOK_SAYACI, "number": item.get('number'), "otp": item.get('otp'), "platform": item.get('platform', 'Bilinmeyen'), "country": item.get('country', 'Bilinmeyen'), "sms": item.get('sms', ''), "time": item.get('time', '')})
-                                new_added += 1
-                    self.wfile.write(json.dumps({"durum": "basarili", "yeni_eklenen": new_added, "toplam_stok": len(STOKLAR)}, ensure_ascii=False, indent=4).encode('utf-8'))
+                        parsed_data = parsed_data[:50]
+                    
+                    self.wfile.write(json.dumps(parsed_data, ensure_ascii=False, indent=4).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"hata": str(e)}, ensure_ascii=False).encode('utf-8'))
             return
