@@ -4,11 +4,12 @@ import urllib.parse
 import re
 import urllib.request
 import ssl
+from datetime import datetime, timedelta
 
 # Admin Şifresi
 ADMIN_KEY = "ziyapurna1010"
 
-# Geçici Hafıza
+# Geçici Hafıza (Adminin manuel eklediği stoklar)
 STOKLAR = []
 STOK_SAYACI = 0
 
@@ -75,6 +76,19 @@ def get_formatted_stocks():
         grouped[app][country] += 1
     return grouped
 
+def fetch_source_codes():
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request("http://194.238.28.236:8000/container", headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
+            data = response.read().decode('utf-8')
+            parsed_data = json.loads(data)
+            return parsed_data if isinstance(parsed_data, list) else []
+    except Exception:
+        return []
+
 class handler(BaseHTTPRequestHandler):
     def end_headers(self):
         self.send_header('Access-Control-Allow-Origin', '*')
@@ -99,15 +113,108 @@ class handler(BaseHTTPRequestHandler):
         if path == '/favicon.ico':
             self.send_response(200); self.send_header('Content-Type', 'image/x-icon'); self.end_headers(); return
 
+        # ==================== 1. ANA DİZİN (ENDPOINT LİSTESİ) ====================
         if path == '/' or path == '/api/index':
-            self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
-            self.wfile.write(json.dumps({"mesaj": "OTP API Calisiyor", "stok_sayisi": len(STOKLAR)}, ensure_ascii=False, indent=4).encode('utf-8'))
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html; charset=utf-8')
+            self.end_headers()
+            
+            html = """
+            <html><head><title>Yxce OTP API</title><meta charset="utf-8"></head>
+            <body style="font-family: Arial, sans-serif; background-color: #121212; color: #e0e0e0; padding: 30px;">
+                <h1 style="color: #2ecc71; text-align: center;">🚀 Yxce OTP API Servisi</h1>
+                <p style="text-align: center; color: #aaa;">Sistem aktif ve çalışıyor.</p>
+                
+                <div style="max-width: 800px; margin: 0 auto; background: #1e1e1e; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                    <h3 style="border-bottom: 2px solid #333; padding-bottom: 10px;">📌 Mevcut Endpoint'ler</h3>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="color: #3498db;">1. Canlı Trafik (Son 5 Dakika)</h4>
+                        <code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /live_trafik</code>
+                        <p style="font-size: 14px; color: #aaa;">Son 5 dakikada düşen kodları ülke ve uygulamaya göre gruplayıp sayar.</p>
+                    </div>
+
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="color: #3498db;">2. Tek Numara Kod Sorgulama</h4>
+                        <code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /kod_sorgula?numara=905551234567</code>
+                        <p style="font-size: 14px; color: #aaa;">Belirtilen numaraya gelen en son OTP kodunu getirir.</p>
+                    </div>
+
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="color: #3498db;">3. Stoktan Numara Alma</h4>
+                        <code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /numara_al?app=WhatsApp&country=Kırgızistan&adet=5</code>
+                        <p style="font-size: 14px; color: #aaa;">Adminin stoğa eklediği numaralardan size verir (Maks. 20).</p>
+                    </div>
+
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="color: #3498db;">4. Stok Durumu</h4>
+                        <code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /stok_durumu</code>
+                        <p style="font-size: 14px; color: #aaa;">Hangi uygulamada hangi ülkeden kaç numara olduğunu gösterir.</p>
+                    </div>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="color: #e74c3c;">5. Admin Paneli (Gizli)</h4>
+                        <code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /admin?key=ziyapurna1010</code>
+                        <p style="font-size: 14px; color: #aaa;">Stok ekleme, silme ve listeleme işlemleri (Sadece yetkili).</p>
+                    </div>
+                </div>
+                
+                <p style="text-align: center; margin-top: 30px; font-size: 12px; color: #555;">Yxce OTP API © 2026</p>
+            </body></html>
+            """
+            self.wfile.write(html.encode('utf-8'))
             return
 
+        # ==================== 2. LIVE TRAFİK ====================
+        if path == '/live_trafik':
+            self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
+            codes = fetch_source_codes()
+            simdi = datetime.now()
+            bes_dakika_once = simdi - timedelta(minutes=5)
+            trafik_sayaci = {}
+            
+            for item in codes:
+                zaman_str = item.get('time')
+                if not zaman_str: continue
+                try:
+                    item_zaman = datetime.strptime(zaman_str, "%Y-%m-%d %H:%M:%S")
+                    if item_zaman >= bes_dakika_once:
+                        platform = str(item.get('platform', 'Bilinmeyen')).capitalize()
+                        ulke = numara_ulke_bul(item.get('number', ''))
+                        key_str = f"{ulke} {platform}"
+                        if key_str not in trafik_sayaci: trafik_sayaci[key_str] = 0
+                        trafik_sayaci[key_str] += 1
+                except Exception:
+                    continue
+            
+            sirali_trafik = dict(sorted(trafik_sayaci.items(), key=lambda x: x[1], reverse=True))
+            self.wfile.write(json.dumps({"son_5_dakika_trafik": sirali_trafik}, ensure_ascii=False, indent=4).encode('utf-8'))
+            return
+
+        # ==================== 3. TEK NUMARA KOD SORGULAMA ====================
+        if path == '/kod_sorgula':
+            self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
+            aranan_numara = query.get('numara', [''])[0]
+            if not aranan_numara:
+                self.wfile.write(json.dumps({"hata": "Numara belirtilmedi."}, ensure_ascii=False).encode('utf-8')); return
+            temiz_numara = re.sub(r"\D", "", aranan_numara)
+            codes = fetch_source_codes()
+            bulunan_kod = None
+            for item in codes:
+                num = re.sub(r"\D", "", str(item.get('number', '')))
+                if num == temiz_numara:
+                    bulunan_kod = item
+                    break
+            if bulunan_kod:
+                self.wfile.write(json.dumps({"durum": "basarili", "veri": bulunan_kod}, ensure_ascii=False, indent=4).encode('utf-8'))
+            else:
+                self.wfile.write(json.dumps({"durum": "basarisiz", "mesaj": "Bu numaraya ait kod bulunamadi."}, ensure_ascii=False).encode('utf-8'))
+            return
+
+        # ==================== 4. ADMIN PANELİ ====================
         if path == '/admin':
             self.send_response(200); self.send_header('Content-type', 'text/html; charset=utf-8'); self.end_headers()
             if key != ADMIN_KEY: self.wfile.write("<h1>Yetkisiz Erişim</h1>".encode('utf-8')); return
-            
             html = f"""
             <html><head><title>OTP Admin Panel</title><meta charset="utf-8"></head>
             <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #1e1e1e; color: #fff;">
@@ -123,11 +230,11 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(html.encode('utf-8'))
             return
 
+        # ==================== 5. ADMIN İŞLEMLERİ ====================
         if path == '/admin_islem':
             self.send_response(200); self.send_header('Content-type', 'text/html; charset=utf-8'); self.end_headers()
             if key != ADMIN_KEY: self.wfile.write("<h1>Yetkisiz Erişim</h1>".encode('utf-8')); return
             islem = query.get('islem', [''])[0]
-
             if islem == "listele":
                 stocks = get_formatted_stocks()
                 html = f"<h2>📋 Stok Listesi</h2><ul>"
@@ -138,12 +245,10 @@ class handler(BaseHTTPRequestHandler):
                 html += f"</ul><br><a href='/admin?key={key}' style='color: #3498db;'>🔙 Geri Dön</a>"
                 self.wfile.write(html.encode('utf-8'))
                 return
-
             elif islem == "sil":
                 STOKLAR.clear()
                 self.wfile.write(f"<h2>🗑️ Tüm Stoklar Silindi!</h2><br><a href='/admin?key={key}' style='color: #3498db;'>🔙 Geri Dön</a>".encode('utf-8'))
                 return
-
             elif islem == "ekle_sayfa":
                 html = f"""
                 <html><head><title>Stok Ekle</title><meta charset="utf-8"></head>
@@ -151,7 +256,6 @@ class handler(BaseHTTPRequestHandler):
                 <h2>➕ Stok Ekle (Dosya ile)</h2>
                 <form action="/dosya_yukle_islem" method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="key" value="{key}">
-                    
                     <label>Uygulama Seçin:</label><br>
                     <select name="app" style="padding: 5px;">
                 """
@@ -169,15 +273,14 @@ class handler(BaseHTTPRequestHandler):
                 return
             return
 
+        # ==================== 6. DOSYA YÜKLEME ====================
         if path == '/dosya_yukle_islem':
             content_length = int(self.headers['Content-Length'])
             boundary = self.headers['Content-Type'].split("=")[1].encode()
             body = self.rfile.read(content_length)
-            
             parts = body.split(boundary)
             file_content = ""
             app_name = "Bilinmeyen"
-            
             for part in parts:
                 if b'name="app"' in part:
                     app_name = part.split(b'\r\n\r\n')[1].split(b'\r\n')[0].decode('utf-8')
@@ -186,33 +289,32 @@ class handler(BaseHTTPRequestHandler):
                         file_content = part.split(b'\r\n\r\n')[1].rsplit(b'\r\n', 1)[0].decode('utf-8', errors='ignore')
                     except Exception:
                         pass
-            
             if file_content:
                 raw_nums = re.split(r'[,\s\n]+', file_content)
                 valid_nums = [re.sub(r"\D", "", n) for n in raw_nums if 8 <= len(re.sub(r"\D", "", n)) <= 15]
-                
                 eklenen = 0
                 for num in valid_nums:
                     ulke = numara_ulke_bul(num)
                     STOK_SAYACI += 1
                     STOKLAR.append({"id": STOK_SAYACI, "number": num, "platform": app_name, "country": ulke})
                     eklenen += 1
-                    
                 self.send_response(200)
                 self.send_header('Content-type', 'text/html; charset=utf-8')
                 self.end_headers()
-                self.wfile.write(f"<h2 style='color:green;'>✅ {eklenen} numara {app_name} uygulaması için başarıyla eklendi.</h2><br><a href='/admin?key={ADMIN_KEY}'>🔙 Geri Dön</a>".encode('utf-8'))
+                self.wfile.write(f"<h2 style='color:green;'>✅ {eklenen} numara eklendi.</h2><br><a href='/admin?key={ADMIN_KEY}'>🔙 Geri Dön</a>".encode('utf-8'))
             else:
                 self.send_response(400)
                 self.end_headers()
-                self.wfile.write("<h2>❌ Dosya okunamadı veya boş.</h2>".encode('utf-8'))
+                self.wfile.write("<h2>❌ Dosya okunamadı.</h2>".encode('utf-8'))
             return
 
+        # ==================== 7. STOK DURUMU ====================
         if path == '/stok_durumu':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
             self.wfile.write(json.dumps(get_formatted_stocks(), ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
+        # ==================== 8. NUMARA ALMA ====================
         if path == '/numara_al':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
             app = query.get('app', [''])[0]
@@ -230,20 +332,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"durum": "basarili", "verilen_adet": count, "numaralar": [s['number'] for s in selected_stocks]}, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
-        if path == '/kod_cek':
-            self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
-            try:
-                ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
-                req = urllib.request.Request("http://194.238.28.236:8000/container", headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
-                    data = response.read().decode('utf-8')
-                    parsed_data = json.loads(data)
-                    if isinstance(parsed_data, list): parsed_data = parsed_data[:50]
-                    self.wfile.write(json.dumps(parsed_data, ensure_ascii=False, indent=4).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"hata": str(e)}, ensure_ascii=False).encode('utf-8'))
-            return
-
+        # ==================== 9. 404 ====================
         self.send_response(404); self.send_header('Content-type', 'application/json'); self.end_headers()
         self.wfile.write(json.dumps({"mesaj": "Gecersiz endpoint"}).encode('utf-8'))
         return
