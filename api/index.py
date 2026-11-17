@@ -3,27 +3,23 @@ import json
 import urllib.parse
 import re
 import urllib.request
+import urllib.error
 import ssl
 from datetime import datetime, timedelta
 import os
 import traceback
 
-# Değişken isimlerini esnek yapan ve URL'yi temizleyen fonksiyon
 def get_kv_creds():
     url = os.environ.get("KV_REST_API_URL") or os.environ.get("STORAGE_REST_API_URL") or os.environ.get("UPSTASH_REDIS_REST_URL")
     token = os.environ.get("KV_REST_API_TOKEN") or os.environ.get("STORAGE_REST_API_TOKEN") or os.environ.get("UPSTASH_REDIS_REST_TOKEN")
-    
-    if url: url = url.strip().rstrip('/') # Sondaki / işaretini ve boşlukları sil
+    if url: url = url.strip().rstrip('/')
     if token: token = token.strip()
     return url, token
 
-# Upstash Redis Bağlantısı (Sıfır Kütüphane, Saf HTTP)
 def redis_req(*args):
     url, token = get_kv_creds()
-    
     if not url or not token:
         return {"error": "Vercel'de Redis bağlantı değişkenleri EKSİK!"}
-    
     try:
         data = json.dumps(args).encode('utf-8')
         req = urllib.request.Request(url, data=data, headers={
@@ -36,11 +32,26 @@ def redis_req(*args):
             return res.get('result')
     except urllib.error.HTTPError as e:
         err_body = e.read().decode('utf-8')
-        return {"error": f"Upstash Bağlantı Hatası (400): {err_body}"}
+        return {"error": f"Upstash Hatası: {err_body}"}
     except Exception as e:
         return {"error": f"Bağlantı Hatası: {str(e)}"}
 
-# Admin Şifresi
+# SCAN ile stok anahtarlarını güvenli çekme fonksiyonu
+def get_all_stock_keys():
+    keys = []
+    cursor = "0"
+    while True:
+        res = redis_req("SCAN", cursor, "MATCH", "stok:*", "COUNT", "1000")
+        if isinstance(res, dict) and "error" in res:
+            return res
+        if not res or len(res) < 2:
+            break
+        cursor = str(res[0])
+        keys.extend(res[1])
+        if cursor == "0":
+            break
+    return keys
+
 ADMIN_KEY = "ziyapurna1010"
 UYGULAMALAR = ["WhatsApp", "Facebook", "Instagram", "Telegram", "Bip", "Twitter", "TikTok", "Discord", "Google"]
 
@@ -94,8 +105,21 @@ def numara_ulke_bul(numara):
             return ULKE_KODLARI[prefix]
     return "Bilinmeyen Ülke"
 
+def fetch_source_codes():
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request("http://194.238.28.236:8000/container", headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
+            data = response.read().decode('utf-8')
+            parsed_data = json.loads(data)
+            return parsed_data if isinstance(parsed_data, list) else []
+    except Exception:
+        return []
+
 def get_formatted_stocks():
-    keys = redis_req("KEYS", "stok:*")
+    keys = get_all_stock_keys()
     if isinstance(keys, dict) and "error" in keys: return keys 
     
     grouped = {}
@@ -249,7 +273,7 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(html.encode('utf-8'))
                 return
             elif islem == "sil":
-                keys = redis_req("KEYS", "stok:*")
+                keys = get_all_stock_keys()
                 if isinstance(keys, dict) and "error" in keys:
                     self.wfile.write(f"<h2 style='color:red;'>Hata: {keys['error']}</h2>".encode('utf-8')); return
                 for k in keys: redis_req("DEL", k)
@@ -291,7 +315,7 @@ class handler(BaseHTTPRequestHandler):
             if count > 20: count = 20
             if not app or not country:
                 self.wfile.write(json.dumps({"hata": "Uygulama ve ülke belirtmelisiniz."}, ensure_ascii=False).encode('utf-8')); return
-            keys = redis_req("KEYS", "stok:*")
+            keys = get_all_stock_keys()
             if isinstance(keys, dict) and "error" in keys:
                 self.wfile.write(json.dumps(keys, ensure_ascii=False).encode('utf-8')); return
             matching_keys = []
