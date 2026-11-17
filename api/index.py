@@ -69,7 +69,7 @@ def get_all_stock_keys():
 ADMIN_KEY = "ziyapurna1010"
 UYGULAMALAR = ["WhatsApp", "Facebook", "Instagram", "Telegram", "Bip", "Twitter", "TikTok", "Discord", "Google"]
 
-# Gizlilik için yeni API URL'si isimsiz değişkene atandı
+# İkinci API URL'si
 API_URL_2 = "https://numberpanel.tech/api/otp?count=200"
 
 ULKE_KODLARI = {
@@ -144,7 +144,6 @@ def fetch_source_codes_2():
         with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
             data = response.read().decode('utf-8')
             parsed_data = json.loads(data)
-            # Yeni API'den gelen veriyi diğer formata uygun hale getir
             if isinstance(parsed_data, list):
                 return parsed_data
             elif isinstance(parsed_data, dict) and "otps" in parsed_data:
@@ -153,14 +152,57 @@ def fetch_source_codes_2():
     except Exception:
         return []
 
+def clean_code_item(item):
+    """API'den gelen karışık veriyi standart bir sözlüğe çevirir."""
+    if isinstance(item, dict):
+        # Direkt sözlükse
+        if 'number' in item and ('otp' in item or 'code' in item):
+            return {
+                'number': item.get('number'),
+                'otp': item.get('otp') or item.get('code'),
+                'platform': item.get('platform') or item.get('service') or 'Bilinmeyen',
+                'time': item.get('time') or item.get('date') or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'sms': item.get('sms') or item.get('message') or '',
+                'country': item.get('country') or numara_ulke_bul(item.get('number', ''))
+            }
+        return None
+    elif isinstance(item, list) and len(item) >= 2:
+        # Liste içindeki listeyse (örn: ["number", "code", "service"...])
+        try:
+            num = str(item[0])
+            otp = str(item[1])
+            platform = str(item[2]) if len(item) > 2 else 'Bilinmeyen'
+            time_str = str(item[3]) if len(item) > 3 else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Tarih formatı geçerli mi kontrol et
+            try:
+                datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+            except:
+                time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+            return {
+                'number': num,
+                'otp': otp,
+                'platform': platform,
+                'time': time_str,
+                'sms': f"{otp} kodu {platform} için.",
+                'country': numara_ulke_bul(num)
+            }
+        except:
+            return None
+    return None
+
 def get_all_codes():
     codes1 = fetch_source_codes_1()
     codes2 = fetch_source_codes_2()
     
-    # İki API'den gelen kodları birleştir
-    all_codes = codes1 + codes2
+    all_codes = []
+    for item in codes1 + codes2:
+        cleaned = clean_code_item(item)
+        if cleaned:
+            all_codes.append(cleaned)
     
-    # Tarihe göre sırala (en yeni en üstte) - hata olursa tarihsizleri en alta at
+    # Tarihe göre sırala (en yeni en üstte)
     def sort_key(x):
         try:
             return datetime.strptime(x.get('time', ''), "%Y-%m-%d %H:%M:%S")
@@ -284,10 +326,8 @@ class handler(BaseHTTPRequestHandler):
             if not aranan_numaralar_str:
                 self.wfile.write(json.dumps({"hata": "Numara belirtilmedi."}, ensure_ascii=False).encode('utf-8')); return
             
-            # Virgülle ayrılmış numaraları al ve temizle
             numaralar = [re.sub(r"\D", "", n) for n in aranan_numaralar_str.split(',') if re.sub(r"\D", "", n)]
             
-            # Maksimum 10 numara kontrolü
             if len(numaralar) > 10:
                 self.wfile.write(json.dumps({"hata": "Aynı anda en fazla 10 numara sorgulanabilir."}, ensure_ascii=False).encode('utf-8')); return
 
