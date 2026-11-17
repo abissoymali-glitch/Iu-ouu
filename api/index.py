@@ -5,20 +5,40 @@ import re
 import urllib.request
 import ssl
 from datetime import datetime, timedelta
-from upstash_redis import Redis
 import os
-import cgi
-import io
+import traceback
+
+# Upstash Redis için doğrudan REST API kullanımı (Kütüphane çökmesini engeller)
+def redis_komut(*args):
+    url = os.environ.get("KV_REST_API_URL")
+    token = os.environ.get("KV_REST_API_TOKEN")
+    if not url or not token:
+        raise Exception("Vercel'de KV_REST_API_URL veya KV_REST_API_TOKEN ortam değişkenleri eksik!")
+    
+    data = json.dumps(args).encode('utf-8')
+    req = urllib.request.Request(url, data=data, headers={
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json'
+    })
+    with urllib.request.urlopen(req) as response:
+        return json.loads(response.read().decode('utf-8')).get('result')
+
+def get_formatted_stocks():
+    keys = redis_komut("KEYS", "stok:*") or []
+    grouped = {}
+    for k in keys:
+        val = redis_komut("GET", k)
+        if val:
+            data = json.loads(val)
+            app = data.get('platform', 'Bilinmeyen')
+            country = data.get('country', 'Bilinmeyen')
+            if app not in grouped: grouped[app] = {}
+            if country not in grouped[app]: grouped[app][country] = 0
+            grouped[app][country] += 1
+    return grouped
 
 # Admin Şifresi
 ADMIN_KEY = "ziyapurna1010"
-
-# Vercel KV Bağlantısı
-redis = Redis(
-    url=os.environ.get("KV_REST_API_URL"),
-    token=os.environ.get("KV_REST_API_TOKEN")
-)
-
 UYGULAMALAR = ["WhatsApp", "Facebook", "Instagram", "Telegram", "Bip", "Twitter", "TikTok", "Discord", "Google"]
 
 ULKE_KODLARI = {
@@ -71,20 +91,6 @@ def numara_ulke_bul(numara):
             return ULKE_KODLARI[prefix]
     return "Bilinmeyen Ülke"
 
-def get_formatted_stocks():
-    keys = redis.keys("stok:*")
-    grouped = {}
-    for k in keys:
-        val = redis.get(k)
-        if val:
-            data = json.loads(val)
-            app = data.get('platform', 'Bilinmeyen')
-            country = data.get('country', 'Bilinmeyen')
-            if app not in grouped: grouped[app] = {}
-            if country not in grouped[app]: grouped[app][country] = 0
-            grouped[app][country] += 1
-    return grouped
-
 def fetch_source_codes():
     try:
         ctx = ssl.create_default_context()
@@ -110,6 +116,26 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        try:
+            self._handle_request()
+        except Exception as e:
+            self.send_response(500)
+            self.send_header('Content-type', 'text/html; charset=utf-8')
+            self.end_headers()
+            error_trace = traceback.format_exc()
+            self.wfile.write(f"<h1>Kritik Hata!</h1><p>{str(e)}</p><pre style='background:#eee;padding:10px;'>{error_trace}</pre>".encode('utf-8'))
+
+    def do_POST(self):
+        try:
+            self._handle_post_request()
+        except Exception as e:
+            self.send_response(500)
+            self.send_header('Content-type', 'text/html; charset=utf-8')
+            self.end_headers()
+            error_trace = traceback.format_exc()
+            self.wfile.write(f"<h1>Kritik Hata!</h1><p>{str(e)}</p><pre style='background:#eee;padding:10px;'>{error_trace}</pre>".encode('utf-8'))
+
+    def _handle_request(self):
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
         query = urllib.parse.parse_qs(parsed_path.query)
@@ -118,7 +144,6 @@ class handler(BaseHTTPRequestHandler):
         if path == '/favicon.ico':
             self.send_response(200); self.send_header('Content-Type', 'image/x-icon'); self.end_headers(); return
 
-        # ==================== 1. ANA DİZİN ====================
         if path == '/' or path == '/api/index':
             self.send_response(200); self.send_header('Content-type', 'text/html; charset=utf-8'); self.end_headers()
             html = """
@@ -138,7 +163,6 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(html.encode('utf-8'))
             return
 
-        # ==================== 2. LIVE TRAFİK ====================
         if path == '/live_trafik':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
             codes = fetch_source_codes()
@@ -161,7 +185,6 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"son_5_dakika_trafik": sirali_trafik}, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
-        # ==================== 3. KOD SORGULAMA ====================
         if path == '/kod_sorgula':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
             aranan_numara = query.get('numara', [''])[0]
@@ -179,7 +202,6 @@ class handler(BaseHTTPRequestHandler):
             else: self.wfile.write(json.dumps({"durum": "basarisiz", "mesaj": "Bu numaraya ait kod bulunamadi."}, ensure_ascii=False).encode('utf-8'))
             return
 
-        # ==================== 4. ADMIN PANELİ ====================
         if path == '/admin':
             self.send_response(200); self.send_header('Content-type', 'text/html; charset=utf-8'); self.end_headers()
             if key != ADMIN_KEY: self.wfile.write("<h1>Yetkisiz Erişim</h1>".encode('utf-8')); return
@@ -198,7 +220,6 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(html.encode('utf-8'))
             return
 
-        # ==================== 5. ADMIN İŞLEMLERİ ====================
         if path == '/admin_islem':
             self.send_response(200); self.send_header('Content-type', 'text/html; charset=utf-8'); self.end_headers()
             if key != ADMIN_KEY: self.wfile.write("<h1>Yetkisiz Erişim</h1>".encode('utf-8')); return
@@ -214,8 +235,8 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(html.encode('utf-8'))
                 return
             elif islem == "sil":
-                keys = redis.keys("stok:*")
-                for k in keys: redis.delete(k)
+                keys = redis_komut("KEYS", "stok:*") or []
+                for k in keys: redis_komut("DEL", k)
                 self.wfile.write(f"<h2>🗑️ Tüm Stoklar Silindi!</h2><br><a href='/admin?key={key}' style='color: #3498db;'>🔙 Geri Dön</a>".encode('utf-8'))
                 return
             elif islem == "ekle_sayfa":
@@ -229,7 +250,7 @@ class handler(BaseHTTPRequestHandler):
                     <select name="app" style="padding: 5px;">
                 """
                 for u in UYGULAMALAR: html += f"<option value='{u}'>{u}</option>"
-                html += """
+                html += f"""
                     </select><br><br>
                     <label>Numara Listesi (.txt) Seçin:</label><br>
                     <input type="file" name="dosya" accept=".txt"><br><br>
@@ -241,13 +262,11 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(html.encode('utf-8'))
                 return
 
-        # ==================== 6. STOK DURUMU ====================
         if path == '/stok_durumu':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
             self.wfile.write(json.dumps(get_formatted_stocks(), ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
-        # ==================== 7. NUMARA ALMA ====================
         if path == '/numara_al':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
             app = query.get('app', [''])[0]
@@ -256,10 +275,10 @@ class handler(BaseHTTPRequestHandler):
             if count > 20: count = 20
             if not app or not country:
                 self.wfile.write(json.dumps({"hata": "Uygulama ve ülke belirtmelisiniz."}, ensure_ascii=False).encode('utf-8')); return
-            keys = redis.keys("stok:*")
+            keys = redis_komut("KEYS", "stok:*") or []
             matching_keys = []
             for k in keys:
-                val = redis.get(k)
+                val = redis_komut("GET", k)
                 if val:
                     data = json.loads(val)
                     if data.get('platform', '').lower() == app.lower() and data.get('country', '').lower() == country.lower():
@@ -270,15 +289,14 @@ class handler(BaseHTTPRequestHandler):
             selected_keys = matching_keys[:count]
             numaralar = []
             for k in selected_keys:
-                val = redis.get(k)
+                val = redis_komut("GET", k)
                 if val:
                     data = json.loads(val)
                     numaralar.append(data['number'])
-                    redis.delete(k)
+                    redis_komut("DEL", k)
             self.wfile.write(json.dumps({"durum": "basarili", "verilen_adet": count, "numaralar": numaralar}, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
-        # ==================== 8. KOD ÇEK ====================
         if path == '/kod_cek':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
             codes = fetch_source_codes()
@@ -286,12 +304,11 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(son_kodlar, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
-        # ==================== 9. 404 ====================
         self.send_response(404); self.send_header('Content-type', 'application/json'); self.end_headers()
         self.wfile.write(json.dumps({"mesaj": "Gecersiz endpoint"}).encode('utf-8'))
         return
 
-    def do_POST(self):
+    def _handle_post_request(self):
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
         
@@ -321,10 +338,10 @@ class handler(BaseHTTPRequestHandler):
                 eklenen = 0
                 for num in valid_nums:
                     ulke = numara_ulke_bul(num)
-                    stok_id = int(redis.incr("stok_sayaci"))
-                    redis.set(f"stok:{stok_id}", json.dumps({"id": stok_id, "number": num, "platform": app_name, "country": ulke}))
+                    stok_id = redis_komut("INCR", "stok_sayaci")
+                    redis_komut("SET", f"stok:{stok_id}", json.dumps({"id": stok_id, "number": num, "platform": app_name, "country": ulke}))
                     eklenen += 1
                 self.wfile.write(f"<h2 style='color:green;'>✅ {eklenen} numara eklendi.</h2><br><a href='/admin?key={ADMIN_KEY}'>🔙 Geri Dön</a>".encode('utf-8'))
             else:
-                self.wfile.write("<h2 style='color:red;'>❌ Dosya okunamadı veya boş.</h2><br><a href='/admin?key={ADMIN_KEY}'>🔙 Geri Dön</a>".encode('utf-8'))
+                self.wfile.write(f"<h2 style='color:red;'>❌ Dosya okunamadı veya boş.</h2><br><a href='/admin?key={ADMIN_KEY}'>🔙 Geri Dön</a>".encode('utf-8'))
             return
