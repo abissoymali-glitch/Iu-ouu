@@ -8,6 +8,7 @@ import ssl
 from datetime import datetime, timedelta
 import os
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 
 def get_kv_creds():
     url = os.environ.get("KV_REST_API_URL") or os.environ.get("STORAGE_REST_API_URL") or os.environ.get("UPSTASH_REDIS_REST_URL")
@@ -69,7 +70,6 @@ def get_all_stock_keys():
 ADMIN_KEY = "ziyapurna1010"
 UYGULAMALAR = ["WhatsApp", "Facebook", "Instagram", "Telegram", "Bip", "Twitter", "TikTok", "Discord", "Google"]
 
-# İkinci API URL'si
 API_URL_2 = "https://numberpanel.tech/api/otp?count=200"
 
 ULKE_KODLARI = {
@@ -128,7 +128,7 @@ def fetch_source_codes_1():
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         req = urllib.request.Request("http://194.238.28.236:8000/container", headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
+        with urllib.request.urlopen(req, timeout=8, context=ctx) as response:
             data = response.read().decode('utf-8')
             parsed_data = json.loads(data)
             return parsed_data if isinstance(parsed_data, list) else []
@@ -141,7 +141,7 @@ def fetch_source_codes_2():
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         req = urllib.request.Request(API_URL_2, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
+        with urllib.request.urlopen(req, timeout=8, context=ctx) as response:
             data = response.read().decode('utf-8')
             parsed_data = json.loads(data)
             if isinstance(parsed_data, list):
@@ -154,11 +154,11 @@ def fetch_source_codes_2():
 
 def clean_code_item(item):
     if isinstance(item, dict):
-        if 'number' in item and ('otp' in item or 'code' in item):
+        if 'number' in item:
             return {
-                'number': item.get('number'),
-                'otp': item.get('otp') or item.get('code'),
-                'platform': item.get('platform') or item.get('service') or 'Bilinmeyen',
+                'number': str(item.get('number', '')),
+                'otp': str(item.get('otp') or item.get('code') or item.get('otp_code') or 'Yok'),
+                'platform': str(item.get('platform') or item.get('service') or item.get('app') or 'Bilinmeyen'),
                 'time': item.get('time') or item.get('date') or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 'sms': item.get('sms') or item.get('message') or '',
                 'country': item.get('country') or numara_ulke_bul(item.get('number', ''))
@@ -187,8 +187,16 @@ def clean_code_item(item):
     return None
 
 def get_all_codes():
-    codes1 = fetch_source_codes_1()
-    codes2 = fetch_source_codes_2()
+    # İki API'yi aynı anda (paralel) çekerek hızlandırıyoruz
+    codes1 = []
+    codes2 = []
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(fetch_source_codes_1)
+        f2 = executor.submit(fetch_source_codes_2)
+        try: codes1 = f1.result(timeout=10)
+        except: pass
+        try: codes2 = f2.result(timeout=10)
+        except: pass
     
     all_codes = []
     for item in codes1 + codes2:
@@ -233,6 +241,7 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0') # Yenilenmeme sorununu çözer
         super().end_headers()
 
     def do_OPTIONS(self):
@@ -265,6 +274,10 @@ class handler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed_path.query)
         key = query.get('key', [''])[0]
 
+        # API Kullanım Sayacı (Sadece ana sayfa ve kod çekme sayılsın, admin sayılmasın)
+        if path not in ['/favicon.ico', '/admin', '/admin_islem']:
+            redis_req("INCR", "api_kullanim_sayaci")
+
         if path == '/favicon.ico':
             self.send_response(200); self.send_header('Content-Type', 'image/x-icon'); self.end_headers(); return
 
@@ -291,22 +304,19 @@ class handler(BaseHTTPRequestHandler):
         if path == '/live_trafik':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
             codes = get_all_codes()
-            
-            # Sadece en son düşen 100 kodu al (trafik için yeterli)
-            codes = codes[:100]
+            codes = codes[:100] # Son 100 kod
             
             trafik_sayaci = {}
             for item in codes:
                 platform = str(item.get('platform', 'Bilinmeyen')).capitalize()
                 ulke = numara_ulke_bul(item.get('number', ''))
                 
-                if ulke == "Bilinmeyen Ülke": continue # Bilinmeyenleri atla
+                if ulke == "Bilinmeyen Ülke": continue
                 
                 key_str = f"{ulke} - {platform}"
                 if key_str not in trafik_sayaci: trafik_sayaci[key_str] = 0
                 trafik_sayaci[key_str] += 1
             
-            # Sırala ve sadece ilk 5 tanesini al
             sirali_trafik = dict(sorted(trafik_sayaci.items(), key=lambda x: x[1], reverse=True)[:5])
             
             self.wfile.write(json.dumps({"en_aktif_5_trafik": sirali_trafik}, ensure_ascii=False, indent=4).encode('utf-8'))
@@ -344,10 +354,17 @@ class handler(BaseHTTPRequestHandler):
         if path == '/admin':
             self.send_response(200); self.send_header('Content-type', 'text/html; charset=utf-8'); self.end_headers()
             if key != ADMIN_KEY: self.wfile.write("<h1>Yetkisiz Erişim</h1>".encode('utf-8')); return
+            
+            # Kullanım sayısını çek
+            kullanim_sayisi = redis_req("GET", "api_kullanim_sayaci") or 0
+            
             html = f"""
             <html><head><title>OTP Admin Panel</title><meta charset="utf-8"></head>
             <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #1e1e1e; color: #fff;">
                 <h2>🛠️ Admin Panel</h2>
+                <div style="background: #2a2a2a; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+                    <h3 style="margin: 0; color: #f1c40f;">📈 Toplam API Kullanımı: {kullanim_sayisi} kez</h3>
+                </div>
                 <form action="/admin_islem" method="GET">
                     <input type="hidden" name="key" value="{key}">
                     <button type="submit" name="islem" value="listele" style="padding: 10px; margin: 5px; background: #3498db; color: white; border: none; border-radius: 5px;">📋 Stok Listesi</button>
