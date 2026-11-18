@@ -10,17 +10,17 @@ import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 
+# YENİ VERİTABANI BİLGİLERİ (Direkt koda gömüldü, eski limitli veritabanını görmezden gelir)
+NEW_KV_URL = "https://prime-doberman-77444.upstash.io"
+NEW_KV_TOKEN = "gQAAAAAAAS6EAAIgcDE3Y2Y3ZWQ1NjZkZGE0MmVlODY0ZjkwNmQxMDZmN2U4Mw"
+
 def get_kv_creds():
-    url = os.environ.get("KV_REST_API_URL") or os.environ.get("STORAGE_REST_API_URL") or os.environ.get("UPSTASH_REDIS_REST_URL")
-    token = os.environ.get("KV_REST_API_TOKEN") or os.environ.get("STORAGE_REST_API_TOKEN") or os.environ.get("UPSTASH_REDIS_REST_TOKEN")
-    if url: url = url.strip().rstrip('/')
-    if token: token = token.strip()
-    return url, token
+    return NEW_KV_URL, NEW_KV_TOKEN
 
 def redis_pipeline(commands):
     url, token = get_kv_creds()
     if not url or not token:
-        return {"error": "Vercel'de Redis bağlantı değişkenleri EKSİK!"}
+        return {"error": "Redis bağlantı bilgileri eksik!"}
     try:
         data = json.dumps(commands).encode('utf-8')
         req = urllib.request.Request(url + "/pipeline", data=data, headers={
@@ -35,7 +35,7 @@ def redis_pipeline(commands):
 def redis_req(*args):
     url, token = get_kv_creds()
     if not url or not token:
-        return {"error": "Vercel'de Redis bağlantı değişkenleri EKSİK!"}
+        return {"error": "Redis bağlantı bilgileri eksik!"}
     try:
         data = json.dumps(args).encode('utf-8')
         req = urllib.request.Request(url, data=data, headers={
@@ -187,10 +187,10 @@ def clean_code_item(item):
 
 def save_codes_to_redis(codes):
     commands = []
-    for item in codes:
-        # Her kodun tekil bir anahtarı olsun (Numara + OTP + Zaman)
+    # Limit yemesin diye sadece son 30 kodu kaydediyoruz
+    for item in codes[:30]:
         key = f"canli_kod:{item['number']}:{item['otp']}:{item['time']}"
-        commands.append(["SET", key, json.dumps(item), "EX", 3600]) # 1 saat sonra silinsin
+        commands.append(["SET", key, json.dumps(item), "EX", 600]) # 10 dakika sonra silinsin
     if commands:
         redis_pipeline(commands)
 
@@ -344,27 +344,19 @@ class handler(BaseHTTPRequestHandler):
 
         if path == '/live_trafik':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
-            
-            # Canlı trafik için API'den yeni verileri çek ve cache'e kaydet
             fetch_and_cache_codes()
-            
-            # Cache'den hızlıca oku
-            codes = get_cached_codes_from_redis()
-            codes = codes[:100]
+            codes = get_cached_codes_from_redis()[:100]
             
             trafik_sayaci = {}
             for item in codes:
                 platform = str(item.get('platform', 'Bilinmeyen')).capitalize()
                 ulke = numara_ulke_bul(item.get('number', ''))
-                
                 if ulke == "Bilinmeyen Ülke": continue
-                
                 key_str = f"{ulke} - {platform}"
                 if key_str not in trafik_sayaci: trafik_sayaci[key_str] = 0
                 trafik_sayaci[key_str] += 1
             
             sirali_trafik = dict(sorted(trafik_sayaci.items(), key=lambda x: x[1], reverse=True)[:5])
-            
             self.wfile.write(json.dumps({"en_aktif_5_trafik": sirali_trafik}, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
@@ -375,11 +367,9 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"hata": "Numara belirtilmedi."}, ensure_ascii=False).encode('utf-8')); return
             
             numaralar = [re.sub(r"\D", "", n) for n in aranan_numaralar_str.split(',') if re.sub(r"\D", "", n)]
-            
             if len(numaralar) > 10:
                 self.wfile.write(json.dumps({"hata": "Aynı anda en fazla 10 numara sorgulanabilir."}, ensure_ascii=False).encode('utf-8')); return
 
-            # Sorgulama yaparken de arkada yeni kodları çekelim ki güncel kalsın
             fetch_and_cache_codes()
             codes = get_cached_codes_from_redis()
             
@@ -527,14 +517,9 @@ class handler(BaseHTTPRequestHandler):
 
         if path == '/kod_cek':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
-            
-            # API'lerden yeni verileri çek ve Redis'e kaydet
             fetch_and_cache_codes()
-            
-            # Redis'ten anında oku ve göster (Süper hızlı)
             codes = get_cached_codes_from_redis()
             son_kodlar = codes[:50]
-            
             self.wfile.write(json.dumps(son_kodlar, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
