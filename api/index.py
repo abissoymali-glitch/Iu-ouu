@@ -19,7 +19,6 @@ def get_kv_creds():
 
 def redis_pipeline(commands):
     url, token = get_kv_creds()
-    if not url or not token: return {"error": "Redis bağlantı bilgileri eksik!"}
     try:
         data = json.dumps(commands).encode('utf-8')
         req = urllib.request.Request(url + "/pipeline", data=data, headers={
@@ -32,7 +31,6 @@ def redis_pipeline(commands):
 
 def redis_req(*args):
     url, token = get_kv_creds()
-    if not url or not token: return {"error": "Redis bağlantı bilgileri eksik!"}
     try:
         data = json.dumps(args).encode('utf-8')
         req = urllib.request.Request(url, data=data, headers={
@@ -42,8 +40,6 @@ def redis_req(*args):
             res = json.loads(response.read().decode('utf-8'))
             if isinstance(res, dict) and 'error' in res: return {"error": f"Redis Hatası: {res['error']}"}
             return res.get('result')
-    except urllib.error.HTTPError as e:
-        return {"error": f"Upstash Hatası: {e.read().decode('utf-8')}"}
     except Exception as e:
         return {"error": f"Bağlantı Hatası: {str(e)}"}
 
@@ -109,7 +105,7 @@ def clean_code_item(item):
                 'time': str(item[3]) if len(item) > 3 else datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 'country': numara_ulke_bul(item[0])
             }
-        except: return None
+        except Exception: return None
     return None
 
 def fetch_and_cache_codes():
@@ -117,9 +113,9 @@ def fetch_and_cache_codes():
     with ThreadPoolExecutor(max_workers=2) as executor:
         f1, f2 = executor.submit(fetch_api_1), executor.submit(fetch_api_2)
         try: codes1 = f1.result(timeout=10)
-        except: pass
+        except Exception: pass
         try: codes2 = f2.result(timeout=10)
-        except: pass
+        except Exception: pass
     
     all_codes = []
     for item in codes1 + codes2:
@@ -151,7 +147,7 @@ def get_cached_codes():
             for val in vals:
                 if val:
                     try: all_codes.append(json.loads(val))
-                    except: pass
+                    except Exception: pass
     all_codes.sort(key=lambda x: x.get('time', ''), reverse=True)
     return all_codes
 
@@ -171,7 +167,7 @@ def get_formatted_stocks():
                         if app not in grouped: grouped[app] = {}
                         if country not in grouped[app]: grouped[app][country] = 0
                         grouped[app][country] += 1
-                    except: pass
+                    except Exception: pass
     return grouped
 
 class handler(BaseHTTPRequestHandler):
@@ -185,22 +181,6 @@ class handler(BaseHTTPRequestHandler):
         self.send_response(200); self.end_headers()
 
     def do_GET(self):
-        try: self._handle_get()
-        except Exception as e:
-            self.send_response(500)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(f"<h1>Hata!</h1><pre>{traceback.format_exc()}</pre>".encode('utf-8'))
-
-    def do_POST(self):
-        try: self._handle_post()
-        except Exception as e:
-            self.send_response(500)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(f"<h1>Hata!</h1><pre>{traceback.format_exc()}</pre>".encode('utf-8'))
-
-    def _handle_get(self):
         parsed_path = urllib.parse.urlparse(self.path)
         path, query = parsed_path.path, urllib.parse.parse_qs(parsed_path.query)
         key = query.get('key', [''])[0]
@@ -208,12 +188,12 @@ class handler(BaseHTTPRequestHandler):
         if path.startswith('/admin'):
             if key != ADMIN_KEY:
                 self.send_response(401)
-                self.wfile.write(json.dumps({"hata": "Yetkisiz Erişim! Admin şifresi yanlış."}).encode('utf-8'))
+                self.wfile.write(json.dumps({"hata": "Yetkisiz Erişim!"}).encode('utf-8'))
                 return
         elif path not in ['/favicon.ico', '/']:
             if not key:
                 self.send_response(401)
-                self.wfile.write(json.dumps({"hata": "Ücretsiz API kapatılmıştır. Lütfen geçerli bir key kullanın."}).encode('utf-8'))
+                self.wfile.write(json.dumps({"hata": "Ücretsiz API kapatılmıştır. Key gereklidir."}).encode('utf-8'))
                 return
             key_data_str = redis_req("GET", f"api_key:{key}")
             if not key_data_str:
@@ -226,7 +206,7 @@ class handler(BaseHTTPRequestHandler):
 
         if path == '/' or path == '/api/index':
             self.send_response(200)
-            html = "<html><body style='font-family: Arial; background: #121212; color: #e0e0e0; padding: 30px;'><h1 style='color: #2ecc71;'>Yxce OTP API</h1><p>Sistem aktif ve çalışıyor. Kullanmak için key gereklidir.</p></body></html>"
+            html = "<html><body style='font-family: Arial; background: #121212; color: #e0e0e0; padding: 30px;'><h1 style='color: #2ecc71;'>Yxce OTP API</h1><p>Sistem aktif. Kullanmak için key gereklidir.</p></body></html>"
             self.wfile.write(html.encode('utf-8')); return
 
         if path == '/kod_cek':
@@ -358,7 +338,7 @@ class handler(BaseHTTPRequestHandler):
                         try:
                             data = json.loads(k_val)
                             html += f"<li><b>{k.replace('api_key:', '')}</b> - Bitiş: {data.get('bitis', 'Bilinmiyor')} <a href='/admin_islem?islem=key_sil&key={key}&hedef={k.replace('api_key:', '')}'>[SİL]</a></li>"
-                        except: pass
+                        except Exception: pass
                 html += f"</ul><br><a href='/admin?key={key}'>🔙 Geri Dön</a>"
                 self.wfile.write(html.encode('utf-8')); return
                 
@@ -391,8 +371,8 @@ class handler(BaseHTTPRequestHandler):
                 ay = int(query.get('ay', ['0'])[0])
                 
                 yeni_key = secrets.token_hex(16)
-                
                 toplam_saniye = (saat * 3600) + (gun * 86400) + (ay * 2592000)
+                
                 if toplam_saniye <= 0:
                     self.wfile.write(f"<h2 style='color:red;'>Hata: Geçerli bir süre girin!</h2><br><a href='/admin?key={key}'>🔙 Geri Dön</a>".encode('utf-8')); return
                     
