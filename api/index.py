@@ -6,11 +6,11 @@ import urllib.request
 import urllib.error
 import ssl
 from datetime import datetime, timedelta
-import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+import secrets
 
-# YENİ VERİTABANI BİLGİLERİ (Limit patlamasın diye koda gömüldü)
+# YENİ VERİTABANI BİLGİLERİ
 NEW_KV_URL = "https://prime-doberman-77444.upstash.io"
 NEW_KV_TOKEN = "gQAAAAAAAS6EAAIgcDE3Y2Y3ZWQ1NjZkZGE0MmVlODY0ZjkwNmQxMDZmN2U4Mw"
 
@@ -47,12 +47,11 @@ def redis_req(*args):
     except Exception as e:
         return {"error": f"Bağlantı Hatası: {str(e)}"}
 
-ADMIN_KEY = "ziyapurna1010" # Eski ana admin şifresi
+ADMIN_KEY = "ziyapurna1010"
 UYGULAMALAR = ["WhatsApp", "Facebook", "Instagram", "Telegram", "Bip", "Twitter", "TikTok", "Discord", "Google"]
 API_URL_1 = "http://194.238.28.236:8000/container"
 API_URL_2 = "https://numberpanel.tech/api/otp?count=200"
 
-# Ülke kodları sözlüğü (Kısaltıldı, senin kodundaki tüm ülkeler burada)
 ULKE_KODLARI = {"1": "ABD/Kanada", "7": "Rusya", "20": "Mısır", "27": "Güney Afrika", "30": "Yunanistan", "31": "Hollanda", "32": "Belçika", "33": "Fransa", "34": "İspanya", "39": "İtalya", "40": "Romanya", "41": "İsviçre", "43": "Avusturya", "44": "İngiltere", "45": "Danimarka", "46": "İsveç", "47": "Norveç", "48": "Polonya", "49": "Almanya", "51": "Peru", "52": "Meksika", "54": "Arjantin", "55": "Brezilya", "56": "Şili", "57": "Kolombiya", "58": "Venezuela", "60": "Malezya", "61": "Avustralya", "62": "Endonezya", "63": "Filipinler", "64": "Yeni Zelanda", "65": "Singapur", "66": "Tayland", "81": "Japonya", "82": "Güney Kore", "84": "Vietnam", "86": "Çin", "90": "Türkiye", "91": "Hindistan", "92": "Pakistan", "93": "Afganistan", "94": "Sri Lanka", "95": "Myanmar", "98": "İran", "212": "Fas", "213": "Cezayir", "216": "Tunus", "218": "Libya", "220": "Gambiya", "221": "Senegal", "222": "Moritanya", "223": "Mali", "224": "Gine", "225": "Fildişi Sahili", "226": "Burkina Faso", "227": "Nijer", "228": "Togo", "229": "Benin", "230": "Mauritius", "231": "Liberya", "232": "Sierra Leone", "233": "Gana", "234": "Nijerya", "235": "Çad", "236": "Orta Afrika", "237": "Kamerun", "238": "Cape Verde", "239": "Sao Tome", "240": "Ekvator Ginesi", "241": "Gabon", "242": "Kongo", "243": "Demokratik Kongo", "244": "Angola", "245": "Gine-Bissau", "246": "Hint Okyanusu", "248": "Seyşeller", "249": "Sudan", "250": "Ruanda", "251": "Etiyopya", "252": "Somali", "253": "Cibuti", "254": "Kenya", "255": "Tanzanya", "256": "Uganda", "257": "Burundi", "258": "Mozambik", "260": "Zambiya", "261": "Madagaskar", "262": "Reunion", "263": "Zimbabve", "264": "Namibya", "265": "Malavi", "266": "Lesotho", "267": "Botsvana", "268": "Esvatini", "269": "Komorlar", "290": "Saint Helena", "291": "Eritre", "297": "Aruba", "298": "Faroe", "299": "Grönland", "350": "Cebelitarık", "351": "Portekiz", "352": "Lüksemburg", "353": "İrlanda", "354": "İzlanda", "355": "Arnavutluk", "356": "Malta", "357": "Kıbrıs", "358": "Finlandiya", "359": "Bulgaristan", "370": "Litvanya", "371": "Letonya", "372": "Estonya", "373": "Moldova", "374": "Ermenistan", "375": "Belarus", "376": "Andorra", "377": "Monako", "378": "San Marino", "380": "Ukrayna", "381": "Sırbistan", "382": "Karadağ", "383": "Kosova", "385": "Hırvatistan", "386": "Slovenya", "387": "Bosna-Hersek", "389": "Kuzey Makedonya", "420": "Çekya", "421": "Slovakya", "423": "Lihtenştayn", "500": "Falkland", "501": "Belize", "502": "Guatemala", "503": "El Salvador", "504": "Honduras", "505": "Nikaragua", "506": "Kosta Rika", "507": "Panama", "509": "Haiti", "590": "Guadeloupe", "591": "Bolivya", "592": "Guyana", "593": "Ekvador", "594": "Fransız Guyanası", "595": "Paraguay", "596": "Martinik", "597": "Surinam", "598": "Uruguay", "599": "Hollanda Antilleri", "670": "Doğu Timor", "672": "Norfolk", "673": "Brunei", "674": "Nauru", "675": "Papua Yeni Gine", "676": "Tonga", "677": "Solomon", "678": "Vanuatu", "679": "Fiji", "680": "Palau", "681": "Wallis", "682": "Cook", "683": "Niue", "685": "Samoa", "686": "Kiribati", "687": "Yeni Kaledonya", "688": "Tuvalu", "689": "Fransız Polinezyası", "690": "Tokelau", "691": "Mikronezya", "692": "Marshall", "850": "Kuzey Kore", "852": "Hong Kong", "853": "Makao", "855": "Kamboçya", "856": "Laos", "880": "Bangladeş", "886": "Tayvan", "960": "Maldivler", "961": "Lübnan", "962": "Ürdün", "963": "Suriye", "964": "Irak", "965": "Kuveyt", "966": "S. Arabistan", "967": "Yemen", "968": "Umman", "970": "Filistin", "971": "BAE", "972": "İsrail", "973": "Bahreyn", "974": "Katar", "975": "Bhutan", "976": "Moğolistan", "977": "Nepal", "992": "Tacikistan", "993": "Türkmenistan", "994": "Azerbaycan", "995": "Gürcistan", "996": "Kırgızistan", "998": "Özbekistan"}
 
 def numara_ulke_bul(numara):
@@ -74,7 +73,6 @@ def get_all_stock_keys():
         if cursor == "0": break
     return keys
 
-# ================= API VERİ ÇEKME =================
 def fetch_api_1():
     try:
         ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
@@ -130,9 +128,9 @@ def fetch_and_cache_codes():
     
     if all_codes:
         commands = []
-        for item in all_codes[:50]: # Son 50 kodu kaydet
+        for item in all_codes[:50]:
             key = f"canli_kod:{item['number']}:{item['otp']}:{item['time']}"
-            commands.append(["SET", key, json.dumps(item), "EX", 600]) # 10 dk ömür
+            commands.append(["SET", key, json.dumps(item), "EX", 600])
         if commands: redis_pipeline(commands)
     return all_codes
 
@@ -190,32 +188,33 @@ class handler(BaseHTTPRequestHandler):
         try: self._handle_get()
         except Exception as e:
             self.send_response(500)
-            self.wfile.write(json.dumps({"hata": "Sunucu Hatası", "detay": str(e)}).encode('utf-8'))
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(f"<h1>Hata!</h1><pre>{traceback.format_exc()}</pre>".encode('utf-8'))
 
     def do_POST(self):
         try: self._handle_post()
         except Exception as e:
             self.send_response(500)
-            self.wfile.write(json.dumps({"hata": "Sunucu Hatası", "detay": str(e)}).encode('utf-8'))
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(f"<h1>Hata!</h1><pre>{traceback.format_exc()}</pre>".encode('utf-8'))
 
     def _handle_get(self):
         parsed_path = urllib.parse.urlparse(self.path)
         path, query = parsed_path.path, urllib.parse.parse_qs(parsed_path.query)
         key = query.get('key', [''])[0]
 
-        # Sadece Admin Paneli Ana Şifre ile açılabilir
         if path.startswith('/admin'):
             if key != ADMIN_KEY:
                 self.send_response(401)
                 self.wfile.write(json.dumps({"hata": "Yetkisiz Erişim! Admin şifresi yanlış."}).encode('utf-8'))
                 return
-        # Diğer tüm endpointler için Key Kontrolü
         elif path not in ['/favicon.ico', '/']:
             if not key:
                 self.send_response(401)
                 self.wfile.write(json.dumps({"hata": "Ücretsiz API kapatılmıştır. Lütfen geçerli bir key kullanın."}).encode('utf-8'))
                 return
-            # Key veritabanında var mı ve süresi geçmiş mi kontrol et
             key_data_str = redis_req("GET", f"api_key:{key}")
             if not key_data_str:
                 self.send_response(401)
@@ -257,7 +256,7 @@ class handler(BaseHTTPRequestHandler):
 
         if path == '/live_trafik':
             fetch_and_cache_codes()
-            codes = get_cached_codes()[:50] # Son 50 koda bak
+            codes = get_cached_codes()[:50] 
             
             trafik = {}
             for item in codes:
@@ -303,7 +302,6 @@ class handler(BaseHTTPRequestHandler):
             if silinecekler: redis_pipeline([["DEL", k] for k in silinecekler])
             self.wfile.write(json.dumps({"durum": "basarili", "verilen_adet": len(numaralar), "numaralar": numaralar}, ensure_ascii=False, indent=4).encode('utf-8')); return
 
-        # ================= ADMIN PANELİ (GET) =================
         if path == '/admin':
             kullanim = redis_req("GET", "api_kullanim_sayaci") or 0
             html = f"""
@@ -342,7 +340,7 @@ class handler(BaseHTTPRequestHandler):
             elif islem == "sil":
                 keys = get_all_stock_keys()
                 if keys: redis_pipeline([["DEL", k] for k in keys])
-                self.wfile.write(f"<h2>🗑️ Tüm Stoklar Silindi!</h2><br><a href='/admin?key={key}'>🔙 Geri Dön</a>".encode('utf-8')); return
+                self.wfile.write(f"<h2>🗑️ Tüm Stoklar Silindi!</h2><br><a href='/admin?key={key}' style='color: #3498db;'>🔙 Geri Dön</a>".encode('utf-8')); return
                 
             elif islem == "ekle_sayfa":
                 html = f"<html><body style='background: #1e1e1e; color: #fff; padding: 20px;'><h2>➕ Stok Ekle</h2><form action='/dosya_yukle_islem' method='POST' enctype='multipart/form-data'><input type='hidden' name='key' value='{key}'><select name='app'>"
@@ -359,7 +357,7 @@ class handler(BaseHTTPRequestHandler):
                     if k_val:
                         try:
                             data = json.loads(k_val)
-                            html += f"<li><b>{k.replace('api_key:', '')}</b> - Süre: {data.get('sure', 'Bilinmiyor')} <a href='/admin_islem?islem=key_sil&key={key}&hedef={k.replace('api_key:', '')}'>[SİL]</a></li>"
+                            html += f"<li><b>{k.replace('api_key:', '')}</b> - Bitiş: {data.get('bitis', 'Bilinmiyor')} <a href='/admin_islem?islem=key_sil&key={key}&hedef={k.replace('api_key:', '')}'>[SİL]</a></li>"
                         except: pass
                 html += f"</ul><br><a href='/admin?key={key}'>🔙 Geri Dön</a>"
                 self.wfile.write(html.encode('utf-8')); return
@@ -392,7 +390,6 @@ class handler(BaseHTTPRequestHandler):
                 gun = int(query.get('gun', ['0'])[0])
                 ay = int(query.get('ay', ['0'])[0])
                 
-                import secrets
                 yeni_key = secrets.token_hex(16)
                 
                 toplam_saniye = (saat * 3600) + (gun * 86400) + (ay * 2592000)
