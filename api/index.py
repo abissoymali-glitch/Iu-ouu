@@ -10,6 +10,7 @@ import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 import secrets
+import time
 
 # YENİ VERİTABANI BİLGİLERİ
 NEW_KV_URL = "https://prime-doberman-77444.upstash.io"
@@ -269,13 +270,15 @@ class handler(BaseHTTPRequestHandler):
                 self.send_response(401)
                 self.wfile.write(json.dumps({"hata": "Yetkisiz Erişim! Admin şifresi yanlış."}).encode('utf-8'))
                 return
-        elif path not in ['/favicon.ico', '/']:
+        elif path not in ['/favicon.ico', '/', '/api/index']:
             if not key:
                 self.send_response(401)
                 self.wfile.write(json.dumps({"hata": "Ücretsiz API kapatılmıştır. Lütfen geçerli bir key kullanın."}).encode('utf-8'))
                 return
             
-            # API kullanım sayacı (Her istekte artır)
+            # KEY İSTEK SAYACI
+            try: redis_req("INCR", f"api_req_sayaci:{key}")
+            except: pass
             try: redis_req("INCR", "api_kullanim_sayaci")
             except: pass
 
@@ -413,11 +416,8 @@ class handler(BaseHTTPRequestHandler):
 
         if path == '/live_trafik':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
-            fetch_and_cache_codes() # Her iki API'den yeni kodları çek ve cache'e kaydet
-            
-            # Hem cache'den hem de canlı API'den gelen verileri birleştir
+            fetch_and_cache_codes()
             codes = get_cached_codes_from_redis()[:100]
-            
             trafik_sayaci = {}
             for item in codes:
                 platform = str(item.get('platform', 'Bilinmeyen')).capitalize()
@@ -441,13 +441,8 @@ class handler(BaseHTTPRequestHandler):
             if len(numaralar) > 10:
                 self.wfile.write(json.dumps({"hata": "Aynı anda en fazla 10 numara sorgulanabilir."}, ensure_ascii=False).encode('utf-8')); return
 
-            # Her iki API'den taze kodları çek
             api_codes = fetch_and_cache_codes()
-            
-            # Cache'deki kodları al
             cache_codes = get_cached_codes_from_redis()
-            
-            # İki listeyi birleştir (API'den gelenler daha günceldir)
             all_codes = api_codes + cache_codes
             
             bulunan_kodlar = {}
@@ -468,7 +463,6 @@ class handler(BaseHTTPRequestHandler):
 
         if path == '/admin':
             self.send_response(200); self.send_header('Content-type', 'text/html; charset=utf-8'); self.end_headers()
-            # Sayaç hatasını düzeltmek için str() ve int() dönüşümü sağlamlaştırıldı
             kullanim_raw = redis_req("GET", "api_kullanim_sayaci")
             try: kullanim_sayisi = int(kullanim_raw) if kullanim_raw and not isinstance(kullanim_raw, dict) else 0
             except: kullanim_sayisi = 0
@@ -496,6 +490,7 @@ class handler(BaseHTTPRequestHandler):
         if path == '/admin_islem':
             self.send_response(200); self.send_header('Content-type', 'text/html; charset=utf-8'); self.end_headers()
             islem = query.get('islem', [''])[0]
+            
             if islem == "listele":
                 stocks = get_formatted_stocks()
                 html = f"<h2>📋 Stok Listesi</h2><ul>"
@@ -505,12 +500,14 @@ class handler(BaseHTTPRequestHandler):
                     html += "</ul></li>"
                 html += f"</ul><br><a href='/admin?key={key}' style='color: #3498db;'>🔙 Geri Dön</a>"
                 self.wfile.write(html.encode('utf-8')); return
+                
             elif islem == "sil":
                 keys = get_all_stock_keys()
                 if keys:
                     commands = [["DEL", k] for k in keys]
                     redis_pipeline(commands)
                 self.wfile.write(f"<h2>🗑️ Tüm Stoklar Silindi!</h2><br><a href='/admin?key={key}' style='color: #3498db;'>🔙 Geri Dön</a>".encode('utf-8')); return
+                
             elif islem == "ekle_sayfa":
                 html = f"""
                 <html><head><title>Stok Ekle</title><meta charset="utf-8"></head>
@@ -532,25 +529,34 @@ class handler(BaseHTTPRequestHandler):
                 </body></html>
                 """
                 self.wfile.write(html.encode('utf-8')); return
+                
             elif islem == "key_listele":
                 keys = redis_req("SCAN", "0", "MATCH", "api_key:*", "COUNT", "1000")
                 key_list = keys[1] if keys and len(keys) > 1 else []
-                html = "<h2>🔑 Key Listesi</h2><ul>"
+                html = "<h2>🔑 Key Listesi ve İstek Sayıları</h2><ul>"
                 for k in key_list:
                     k_val = redis_req("GET", k)
+                    k_name = k.replace('api_key:', '')
+                    req_count_raw = redis_req("GET", f"api_req_sayaci:{k_name}")
+                    try: req_count = int(req_count_raw) if req_count_raw and not isinstance(req_count_raw, dict) else 0
+                    except: req_count = 0
+                    
                     if k_val:
                         try:
                             data = json.loads(k_val)
-                            html += f"<li><b>{k.replace('api_key:', '')}</b> - Bitiş: {data.get('bitis', 'Bilinmiyor')} <a href='/admin_islem?islem=key_sil&key={key}&hedef={k.replace('api_key:', '')}'>[SİL]</a></li>"
+                            html += f"<li><b>{k_name}</b> - İstek: {req_count} - Bitiş: {data.get('bitis', 'Bilinmiyor')} <a href='/admin_islem?islem=key_sil&key={key}&hedef={k_name}'>[SİL]</a></li>"
                         except Exception: pass
                 html += f"</ul><br><a href='/admin?key={key}'>🔙 Geri Dön</a>"
                 self.wfile.write(html.encode('utf-8')); return
+                
             elif islem == "key_sil":
                 hedef = query.get('hedef', [''])[0]
                 if hedef:
                     redis_req("DEL", f"api_key:{hedef}")
+                    redis_req("DEL", f"api_req_sayaci:{hedef}")
                     self.wfile.write(f"<h2>🗑️ Key Silindi!</h2><br><a href='/admin_islem?islem=key_listele&key={key}'>🔙 Geri Dön</a>".encode('utf-8'))
                 return
+                
             elif islem == "key_olustur_sayfa":
                 html = f"""
                 <html><body style='background: #1e1e1e; color: #fff; padding: 20px;'>
@@ -566,6 +572,7 @@ class handler(BaseHTTPRequestHandler):
                 <br><a href='/admin?key={key}'>🔙 Geri Dön</a></body></html>
                 """
                 self.wfile.write(html.encode('utf-8')); return
+                
             elif islem == "key_olustur":
                 saat = int(query.get('saat', ['0'])[0]); gun = int(query.get('gun', ['0'])[0]); ay = int(query.get('ay', ['0'])[0])
                 yeni_key = secrets.token_hex(16)
@@ -613,14 +620,16 @@ class handler(BaseHTTPRequestHandler):
                         numaralar.append(json.loads(val)['number'])
                         keys_to_delete.append(selected_keys[idx])
                         
+            # ÖNEMLİ: Numaralar kullanıcıya verilmeden ÖNCE stoktan siliniyor!
             if keys_to_delete: redis_pipeline([["DEL", k] for k in keys_to_delete])
+            
             self.wfile.write(json.dumps({"durum": "basarili", "verilen_adet": len(numaralar), "numaralar": numaralar}, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
         if path == '/kod_cek':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
-            fetch_and_cache_codes() # Canlı API'lerden yeni kodları çek
-            codes = get_cached_codes_from_redis() # Sonra veritabanındaki güncel listeyi al
+            fetch_and_cache_codes()
+            codes = get_cached_codes_from_redis()
             self.wfile.write(json.dumps(codes[:10], ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
