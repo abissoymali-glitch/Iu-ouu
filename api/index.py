@@ -11,7 +11,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 import secrets
 
-# YENİ VERİTABANI BİLGİLERİ (Direkt koda gömüldü, eski limitli veritabanını görmezden gelir)
+# YENİ VERİTABANI BİLGİLERİ
 NEW_KV_URL = "https://prime-doberman-77444.upstash.io"
 NEW_KV_TOKEN = "gQAAAAAAAS6EAAIgcDE3Y2Y3ZWQ1NjZkZGE0MmVlODY0ZjkwNmQxMDZmN2U4Mw"
 
@@ -70,6 +70,7 @@ def get_all_stock_keys():
 
 ADMIN_KEY = "ziyapurna1010"
 UYGULAMALAR = ["WhatsApp", "Facebook", "Instagram", "Telegram", "Bip", "Twitter", "TikTok", "Discord", "Google"]
+API_URL_1 = "http://194.238.28.236:8000/container"
 API_URL_2 = "https://numberpanel.tech/api/otp?count=200"
 
 ULKE_KODLARI = {
@@ -115,7 +116,7 @@ ULKE_KODLARI = {
 }
 
 def numara_ulke_bul(numara):
-    numara = re.sub(r"\D", "", numara)
+    numara = re.sub(r"\D", "", str(numara))
     for uzunluk in [3, 2, 1]:
         prefix = numara[:uzunluk]
         if prefix in ULKE_KODLARI:
@@ -127,7 +128,7 @@ def fetch_source_codes_1():
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        req = urllib.request.Request("http://194.238.28.236:8000/container", headers={'User-Agent': 'Mozilla/5.0'})
+        req = urllib.request.Request(API_URL_1, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=8, context=ctx) as response:
             data = response.read().decode('utf-8')
             parsed_data = json.loads(data)
@@ -142,117 +143,78 @@ def fetch_source_codes_2():
         ctx.verify_mode = ssl.CERT_NONE
         req = urllib.request.Request(API_URL_2, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=8, context=ctx) as response:
-            data = response.read().decode('utf-8')
-            parsed_data = json.loads(data)
-            if isinstance(parsed_data, list):
-                return parsed_data
-            elif isinstance(parsed_data, dict) and "otps" in parsed_data:
-                return parsed_data["otps"]
+            data = json.loads(response.read().decode('utf-8'))
+            if isinstance(data, list): return data
+            elif isinstance(data, dict) and "otps" in data: return data["otps"]
             return []
     except Exception:
         return []
 
 def clean_code_item(item):
-    if isinstance(item, dict):
-        if 'number' in item:
-            return {
-                'number': str(item.get('number', '')),
-                'otp': str(item.get('otp') or item.get('code') or item.get('otp_code') or 'Yok'),
-                'platform': str(item.get('platform') or item.get('service') or item.get('app') or 'Bilinmeyen'),
-                'time': item.get('time') or item.get('date') or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'sms': item.get('sms') or item.get('message') or '',
-                'country': item.get('country') or numara_ulke_bul(item.get('number', ''))
-            }
-        return None
+    if isinstance(item, dict) and 'number' in item:
+        return {
+            'number': str(item.get('number', '')),
+            'otp': str(item.get('otp') or item.get('code') or item.get('otp_code') or 'Yok'),
+            'platform': str(item.get('platform') or item.get('service') or item.get('app') or 'Bilinmeyen'),
+            'time': item.get('time') or item.get('date') or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'sms': item.get('sms') or item.get('message') or '',
+            'country': item.get('country') or numara_ulke_bul(item.get('number', ''))
+        }
     elif isinstance(item, list) and len(item) >= 2:
         try:
-            num = str(item[0])
-            otp = str(item[1])
+            num, otp = str(item[0]), str(item[1])
             platform = str(item[2]) if len(item) > 2 else 'Bilinmeyen'
             time_str = str(item[3]) if len(item) > 3 else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            try:
-                datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
-            except:
-                time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            return {
-                'number': num,
-                'otp': otp,
-                'platform': platform,
-                'time': time_str,
-                'sms': f"{otp} kodu {platform} için.",
-                'country': numara_ulke_bul(num)
-            }
-        except:
-            return None
+            try: datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+            except: time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            return {'number': num, 'otp': otp, 'platform': platform, 'time': time_str, 'sms': f"{otp} kodu {platform} için.", 'country': numara_ulke_bul(num)}
+        except Exception: return None
     return None
 
 def save_codes_to_redis(codes):
     commands = []
-    for item in codes[:30]:
+    for item in codes[:50]:
         key = f"canli_kod:{item['number']}:{item['otp']}:{item['time']}"
         commands.append(["SET", key, json.dumps(item), "EX", 600])
-    if commands:
-        redis_pipeline(commands)
+    if commands: redis_pipeline(commands)
 
 def get_cached_codes_from_redis():
     keys = []
     cursor = "0"
     while True:
         res = redis_req("SCAN", cursor, "MATCH", "canli_kod:*", "COUNT", "10000")
-        if isinstance(res, dict) and "error" in res:
-            return []
-        if not res or len(res) < 2:
-            break
-        cursor = str(res[0])
-        keys.extend(res[1])
-        if cursor == "0":
-            break
-            
-    if not keys:
-        return []
+        if isinstance(res, dict) and "error" in res: return []
+        if not res or len(res) < 2: break
+        cursor = str(res[0]); keys.extend(res[1])
+        if cursor == "0": break
+    if not keys: return []
         
     all_codes = []
-    chunk_size = 500
-    for i in range(0, len(keys), chunk_size):
-        chunk_keys = keys[i:i+chunk_size]
-        vals = redis_req("MGET", *chunk_keys)
+    for i in range(0, len(keys), 500):
+        vals = redis_req("MGET", *keys[i:i+500])
         if vals and isinstance(vals, list):
             for val in vals:
                 if val:
-                    try:
-                        all_codes.append(json.loads(val))
-                    except:
-                        pass
-                        
-    def sort_key(x):
-        try:
-            return datetime.strptime(x.get('time', ''), "%Y-%m-%d %H:%M:%S")
-        except:
-            return datetime.min
-    all_codes.sort(key=sort_key, reverse=True)
-    
+                    try: all_codes.append(json.loads(val))
+                    except Exception: pass
+    all_codes.sort(key=lambda x: x.get('time', ''), reverse=True)
     return all_codes
 
 def fetch_and_cache_codes():
-    codes1 = []
-    codes2 = []
+    codes1, codes2 = [], []
     with ThreadPoolExecutor(max_workers=2) as executor:
-        f1 = executor.submit(fetch_source_codes_1)
-        f2 = executor.submit(fetch_source_codes_2)
+        f1, f2 = executor.submit(fetch_source_codes_1), executor.submit(fetch_source_codes_2)
         try: codes1 = f1.result(timeout=10)
-        except: pass
+        except Exception: pass
         try: codes2 = f2.result(timeout=10)
-        except: pass
+        except Exception: pass
     
     all_codes = []
     for item in codes1 + codes2:
         cleaned = clean_code_item(item)
-        if cleaned:
-            all_codes.append(cleaned)
+        if cleaned: all_codes.append(cleaned)
     
-    if all_codes:
-        save_codes_to_redis(all_codes)
-        
+    if all_codes: save_codes_to_redis(all_codes)
     return all_codes
 
 def get_formatted_stocks():
@@ -260,22 +222,18 @@ def get_formatted_stocks():
     if isinstance(keys, dict) and "error" in keys: return keys 
     grouped = {}
     if not keys: return grouped
-    chunk_size = 500
-    for i in range(0, len(keys), chunk_size):
-        chunk_keys = keys[i:i+chunk_size]
-        vals = redis_req("MGET", *chunk_keys)
+    for i in range(0, len(keys), 500):
+        vals = redis_req("MGET", *keys[i:i+500])
         if vals and isinstance(vals, list):
             for val in vals:
                 if val:
                     try:
                         data = json.loads(val)
-                        app = data.get('platform', 'Bilinmeyen')
-                        country = data.get('country', 'Bilinmeyen')
+                        app, country = data.get('platform', 'Bilinmeyen'), data.get('country', 'Bilinmeyen')
                         if app not in grouped: grouped[app] = {}
                         if country not in grouped[app]: grouped[app][country] = 0
                         grouped[app][country] += 1
-                    except:
-                        pass
+                    except Exception: pass
     return grouped
 
 class handler(BaseHTTPRequestHandler):
@@ -287,33 +245,23 @@ class handler(BaseHTTPRequestHandler):
         super().end_headers()
 
     def do_OPTIONS(self):
-        self.send_response(200)
-        self.end_headers()
+        self.send_response(200); self.end_headers()
 
     def do_GET(self):
-        try:
-            self._handle_get()
+        try: self._handle_get()
         except Exception as e:
-            self.send_response(500)
-            self.send_header('Content-type', 'text/html; charset=utf-8')
-            self.end_headers()
-            error_trace = traceback.format_exc()
-            self.wfile.write(f"<h2>Hata Oluştu!</h2><p>{str(e)}</p><pre style='background:#eee;padding:10px;'>{error_trace}</pre>".encode('utf-8'))
+            self.send_response(500); self.send_header('Content-type', 'text/html; charset=utf-8'); self.end_headers()
+            self.wfile.write(f"<h2>Hata!</h2><pre>{traceback.format_exc()}</pre>".encode('utf-8'))
 
     def do_POST(self):
-        try:
-            self._handle_post()
+        try: self._handle_post()
         except Exception as e:
-            self.send_response(500)
-            self.send_header('Content-type', 'text/html; charset=utf-8')
-            self.end_headers()
-            error_trace = traceback.format_exc()
-            self.wfile.write(f"<h2>Hata Oluştu!</h2><p>{str(e)}</p><pre style='background:#eee;padding:10px;'>{error_trace}</pre>".encode('utf-8'))
+            self.send_response(500); self.send_header('Content-type', 'text/html; charset=utf-8'); self.end_headers()
+            self.wfile.write(f"<h2>Hata!</h2><pre>{traceback.format_exc()}</pre>".encode('utf-8'))
 
     def _handle_get(self):
         parsed_path = urllib.parse.urlparse(self.path)
-        path = parsed_path.path
-        query = urllib.parse.parse_qs(parsed_path.query)
+        path, query = parsed_path.path, urllib.parse.parse_qs(parsed_path.query)
         key = query.get('key', [''])[0]
 
         if path.startswith('/admin'):
@@ -326,6 +274,11 @@ class handler(BaseHTTPRequestHandler):
                 self.send_response(401)
                 self.wfile.write(json.dumps({"hata": "Ücretsiz API kapatılmıştır. Lütfen geçerli bir key kullanın."}).encode('utf-8'))
                 return
+            
+            # API kullanım sayacı (Her istekte artır)
+            try: redis_req("INCR", "api_kullanim_sayaci")
+            except: pass
+
             key_data_str = redis_req("GET", f"api_key:{key}")
             if not key_data_str:
                 self.send_response(401)
@@ -338,27 +291,132 @@ class handler(BaseHTTPRequestHandler):
         if path == '/' or path == '/api/index':
             self.send_response(200); self.send_header('Content-type', 'text/html; charset=utf-8'); self.end_headers()
             html = """
-            <html><head><title>Yxce OTP API</title><meta charset="utf-8"></head>
-            <body style="font-family: Arial, sans-serif; background-color: #121212; color: #e0e0e0; padding: 30px;">
-                <h1 style="color: #2ecc71; text-align: center;">🚀 Yxce OTP API Servisi</h1>
-                <p style="text-align: center; color: #aaa;">Sistem aktif ve çalışıyor. Kullanmak için key gereklidir.</p>
-                <div style="max-width: 800px; margin: 0 auto; background: #1e1e1e; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
-                    <h3 style="border-bottom: 2px solid #333; padding-bottom: 10px;">📌 Mevcut Endpoint'ler</h3>
-                    <div style="margin-bottom: 20px;"><h4 style="color: #3498db;">1. Canlı Trafik</h4><code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /live_trafik?key=KEYINIZ</code></div>
-                    <div style="margin-bottom: 20px;"><h4 style="color: #3498db;">2. Kod Sorgulama (Maks. 10 Numara)</h4><code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /kod_sorgula?key=KEYINIZ&numara=905551234567,905551234568</code></div>
-                    <div style="margin-bottom: 20px;"><h4 style="color: #3498db;">3. Numara Alma</h4><code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /numara_al?key=KEYINIZ&app=WhatsApp&country=Kırgızistan&adet=5</code></div>
-                    <div style="margin-bottom: 20px;"><h4 style="color: #3498db;">4. Stok Durumu</h4><code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /stok_durumu?key=KEYINIZ</code></div>
-                    <div style="margin-bottom: 20px;"><h4 style="color: #3498db;">5. En Son Düşen 10 Kod</h4><code style="background: #2a2a2a; padding: 5px; display: block; border-radius: 5px;">GET /kod_cek?key=KEYINIZ</code></div>
+            <!DOCTYPE html>
+            <html lang="tr">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Yxce OTP API</title>
+                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+                <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+                    body {
+                        background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+                        color: #fff;
+                        min-height: 100vh;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        padding: 20px;
+                    }
+                    .container {
+                        background: rgba(255, 255, 255, 0.05);
+                        backdrop-filter: blur(10px);
+                        border: 1px solid rgba(255, 255, 255, 0.1);
+                        border-radius: 20px;
+                        padding: 40px;
+                        max-width: 900px;
+                        width: 100%;
+                        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
+                        animation: fadeIn 1s ease-in-out;
+                    }
+                    @keyframes fadeIn {
+                        from { opacity: 0; transform: translateY(-20px); }
+                        to { opacity: 1; transform: translateY(0); }
+                    }
+                    h1 {
+                        text-align: center;
+                        font-size: 2.5rem;
+                        font-weight: 800;
+                        background: -webkit-linear-gradient(45deg, #00c6ff, #0072ff);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                        margin-bottom: 10px;
+                    }
+                    .subtitle {
+                        text-align: center;
+                        color: #aaa;
+                        margin-bottom: 30px;
+                        font-size: 0.9rem;
+                    }
+                    .endpoint-card {
+                        background: rgba(255, 255, 255, 0.03);
+                        border-radius: 12px;
+                        padding: 20px;
+                        margin-bottom: 15px;
+                        transition: transform 0.3s ease, background 0.3s ease;
+                    }
+                    .endpoint-card:hover {
+                        transform: translateX(10px);
+                        background: rgba(255, 255, 255, 0.08);
+                    }
+                    .endpoint-title {
+                        color: #00c6ff;
+                        font-size: 1.1rem;
+                        font-weight: 600;
+                        margin-bottom: 8px;
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                    }
+                    code {
+                        background: #121212;
+                        color: #2ecc71;
+                        padding: 12px;
+                        border-radius: 8px;
+                        display: block;
+                        font-family: 'Courier New', monospace;
+                        font-size: 0.9rem;
+                        word-break: break-all;
+                        border-left: 4px solid #00c6ff;
+                    }
+                    .footer {
+                        text-align: center;
+                        margin-top: 30px;
+                        color: #666;
+                        font-size: 0.8rem;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>🚀 Yxce OTP API</h1>
+                    <p class="subtitle">Sistem aktif ve çalışıyor. Kullanmak için geçerli bir key gereklidir.</p>
+
+                    <div class="endpoint-card">
+                        <div class="endpoint-title">🔥 1. Canlı Trafik</div>
+                        <code>GET /live_trafik?key=KEYINIZ</code>
+                    </div>
+                    <div class="endpoint-card">
+                        <div class="endpoint-title">🔍 2. Kod Sorgulama</div>
+                        <code>GET /kod_sorgula?key=KEYINIZ&numara=905551234567,905551234568</code>
+                    </div>
+                    <div class="endpoint-card">
+                        <div class="endpoint-title">📞 3. Numara Alma</div>
+                        <code>GET /numara_al?key=KEYINIZ&app=WhatsApp&country=Türkiye&adet=5</code>
+                    </div>
+                    <div class="endpoint-card">
+                        <div class="endpoint-title">📊 4. Stok Durumu</div>
+                        <code>GET /stok_durumu?key=KEYINIZ</code>
+                    </div>
+                    <div class="endpoint-card">
+                        <div class="endpoint-title">📩 5. En Son Düşen 10 Kod</div>
+                        <code>GET /kod_cek?key=KEYINIZ</code>
+                    </div>
+
+                    <p class="footer">Yxce OTP API © 2026 | Gelişmiş Güvenlik ve Altyapı</p>
                 </div>
-            </body></html>
+            </body>
+            </html>
             """
-            self.wfile.write(html.encode('utf-8'))
-            return
+            self.wfile.write(html.encode('utf-8')); return
 
         if path == '/live_trafik':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
-            fetch_and_cache_codes()
-            codes = get_cached_codes_from_redis()[:50]
+            fetch_and_cache_codes() # Her iki API'den yeni kodları çek ve cache'e kaydet
+            
+            # Hem cache'den hem de canlı API'den gelen verileri birleştir
+            codes = get_cached_codes_from_redis()[:100]
             
             trafik_sayaci = {}
             for item in codes:
@@ -383,13 +441,19 @@ class handler(BaseHTTPRequestHandler):
             if len(numaralar) > 10:
                 self.wfile.write(json.dumps({"hata": "Aynı anda en fazla 10 numara sorgulanabilir."}, ensure_ascii=False).encode('utf-8')); return
 
-            fetch_and_cache_codes()
-            codes = get_cached_codes_from_redis()
+            # Her iki API'den taze kodları çek
+            api_codes = fetch_and_cache_codes()
+            
+            # Cache'deki kodları al
+            cache_codes = get_cached_codes_from_redis()
+            
+            # İki listeyi birleştir (API'den gelenler daha günceldir)
+            all_codes = api_codes + cache_codes
             
             bulunan_kodlar = {}
-            for item in codes:
+            for item in all_codes:
                 num = re.sub(r"\D", "", str(item.get('number', '')))
-                if num in numaralar and num not in bulununan_kodlar:
+                if num in numaralar and num not in bulunan_kodlar:
                     bulunan_kodlar[num] = item
             
             sonuc = {}
@@ -404,7 +468,10 @@ class handler(BaseHTTPRequestHandler):
 
         if path == '/admin':
             self.send_response(200); self.send_header('Content-type', 'text/html; charset=utf-8'); self.end_headers()
-            kullanim_sayisi = redis_req("GET", "api_kullanim_sayaci") or 0
+            # Sayaç hatasını düzeltmek için str() ve int() dönüşümü sağlamlaştırıldı
+            kullanim_raw = redis_req("GET", "api_kullanim_sayaci")
+            try: kullanim_sayisi = int(kullanim_raw) if kullanim_raw and not isinstance(kullanim_raw, dict) else 0
+            except: kullanim_sayisi = 0
             
             html = f"""
             <html><head><title>OTP Admin Panel</title><meta charset="utf-8"></head>
@@ -424,8 +491,7 @@ class handler(BaseHTTPRequestHandler):
                 </form>
             </body></html>
             """
-            self.wfile.write(html.encode('utf-8'))
-            return
+            self.wfile.write(html.encode('utf-8')); return
 
         if path == '/admin_islem':
             self.send_response(200); self.send_header('Content-type', 'text/html; charset=utf-8'); self.end_headers()
@@ -438,15 +504,13 @@ class handler(BaseHTTPRequestHandler):
                     for c, count in countries.items(): html += f"<li>{c}: {count} numara</li>"
                     html += "</ul></li>"
                 html += f"</ul><br><a href='/admin?key={key}' style='color: #3498db;'>🔙 Geri Dön</a>"
-                self.wfile.write(html.encode('utf-8'))
-                return
+                self.wfile.write(html.encode('utf-8')); return
             elif islem == "sil":
                 keys = get_all_stock_keys()
                 if keys:
                     commands = [["DEL", k] for k in keys]
                     redis_pipeline(commands)
-                self.wfile.write(f"<h2>🗑️ Tüm Stoklar Silindi!</h2><br><a href='/admin?key={key}' style='color: #3498db;'>🔙 Geri Dön</a>".encode('utf-8'))
-                return
+                self.wfile.write(f"<h2>🗑️ Tüm Stoklar Silindi!</h2><br><a href='/admin?key={key}' style='color: #3498db;'>🔙 Geri Dön</a>".encode('utf-8')); return
             elif islem == "ekle_sayfa":
                 html = f"""
                 <html><head><title>Stok Ekle</title><meta charset="utf-8"></head>
@@ -467,8 +531,7 @@ class handler(BaseHTTPRequestHandler):
                 <br><a href='/admin?key={key}' style='color: #3498db;'>🔙 Geri Dön</a>
                 </body></html>
                 """
-                self.wfile.write(html.encode('utf-8'))
-                return
+                self.wfile.write(html.encode('utf-8')); return
             elif islem == "key_listele":
                 keys = redis_req("SCAN", "0", "MATCH", "api_key:*", "COUNT", "1000")
                 key_list = keys[1] if keys and len(keys) > 1 else []
@@ -479,17 +542,15 @@ class handler(BaseHTTPRequestHandler):
                         try:
                             data = json.loads(k_val)
                             html += f"<li><b>{k.replace('api_key:', '')}</b> - Bitiş: {data.get('bitis', 'Bilinmiyor')} <a href='/admin_islem?islem=key_sil&key={key}&hedef={k.replace('api_key:', '')}'>[SİL]</a></li>"
-                        except: pass
+                        except Exception: pass
                 html += f"</ul><br><a href='/admin?key={key}'>🔙 Geri Dön</a>"
                 self.wfile.write(html.encode('utf-8')); return
-                
             elif islem == "key_sil":
                 hedef = query.get('hedef', [''])[0]
                 if hedef:
                     redis_req("DEL", f"api_key:{hedef}")
                     self.wfile.write(f"<h2>🗑️ Key Silindi!</h2><br><a href='/admin_islem?islem=key_listele&key={key}'>🔙 Geri Dön</a>".encode('utf-8'))
                 return
-                
             elif islem == "key_olustur_sayfa":
                 html = f"""
                 <html><body style='background: #1e1e1e; color: #fff; padding: 20px;'>
@@ -505,11 +566,8 @@ class handler(BaseHTTPRequestHandler):
                 <br><a href='/admin?key={key}'>🔙 Geri Dön</a></body></html>
                 """
                 self.wfile.write(html.encode('utf-8')); return
-                
             elif islem == "key_olustur":
-                saat = int(query.get('saat', ['0'])[0])
-                gun = int(query.get('gun', ['0'])[0])
-                ay = int(query.get('ay', ['0'])[0])
+                saat = int(query.get('saat', ['0'])[0]); gun = int(query.get('gun', ['0'])[0]); ay = int(query.get('ay', ['0'])[0])
                 yeni_key = secrets.token_hex(16)
                 toplam_saniye = (saat * 3600) + (gun * 86400) + (ay * 2592000)
                 if toplam_saniye <= 0:
@@ -520,13 +578,11 @@ class handler(BaseHTTPRequestHandler):
 
         if path == '/stok_durumu':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
-            self.wfile.write(json.dumps(get_formatted_stocks(), ensure_ascii=False, indent=4).encode('utf-8'))
-            return
+            self.wfile.write(json.dumps(get_formatted_stocks(), ensure_ascii=False, indent=4).encode('utf-8')); return
 
         if path == '/numara_al':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
-            app = query.get('app', [''])[0]
-            country = query.get('country', [''])[0]
+            app, country = query.get('app', [''])[0], query.get('country', [''])[0]
             count = int(query.get('adet', ['1'])[0])
             if count > 20: count = 20
             if not app or not country:
@@ -534,16 +590,14 @@ class handler(BaseHTTPRequestHandler):
             
             keys = get_all_stock_keys()
             matching_keys = []
-            chunk_size = 500
-            for i in range(0, len(keys), chunk_size):
-                chunk_keys = keys[i:i+chunk_size]
-                vals = redis_req("MGET", *chunk_keys)
+            for i in range(0, len(keys), 500):
+                vals = redis_req("MGET", *keys[i:i+500])
                 if vals and isinstance(vals, list):
                     for idx, val in enumerate(vals):
                         if val:
                             data = json.loads(val)
                             if data.get('platform', '').lower() == app.lower() and data.get('country', '').lower() == country.lower():
-                                matching_keys.append(chunk_keys[idx])
+                                matching_keys.append(keys[i+idx])
 
             if not matching_keys:
                 self.wfile.write(json.dumps({"hata": "Stok bulunamadı."}, ensure_ascii=False).encode('utf-8')); return
@@ -552,26 +606,21 @@ class handler(BaseHTTPRequestHandler):
             selected_keys = matching_keys[:count]
             selected_vals = redis_req("MGET", *selected_keys)
             
-            numaralar = []
-            keys_to_delete = []
+            numaralar, keys_to_delete = [], []
             if selected_vals and isinstance(selected_vals, list):
                 for idx, val in enumerate(selected_vals):
                     if val:
-                        data = json.loads(val)
-                        numaralar.append(data['number'])
+                        numaralar.append(json.loads(val)['number'])
                         keys_to_delete.append(selected_keys[idx])
                         
-            if keys_to_delete:
-                commands = [["DEL", k] for k in keys_to_delete]
-                redis_pipeline(commands)
-
+            if keys_to_delete: redis_pipeline([["DEL", k] for k in keys_to_delete])
             self.wfile.write(json.dumps({"durum": "basarili", "verilen_adet": len(numaralar), "numaralar": numaralar}, ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
         if path == '/kod_cek':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
-            fetch_and_cache_codes()
-            codes = get_cached_codes_from_redis()
+            fetch_and_cache_codes() # Canlı API'lerden yeni kodları çek
+            codes = get_cached_codes_from_redis() # Sonra veritabanındaki güncel listeyi al
             self.wfile.write(json.dumps(codes[:10], ensure_ascii=False, indent=4).encode('utf-8'))
             return
 
