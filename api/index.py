@@ -276,7 +276,6 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"hata": "Ücretsiz API kapatılmıştır. Lütfen geçerli bir key kullanın."}).encode('utf-8'))
                 return
             
-            # KEY İSTEK SAYACI
             try: redis_req("INCR", f"api_req_sayaci:{key}")
             except: pass
             try: redis_req("INCR", "api_kullanim_sayaci")
@@ -494,10 +493,18 @@ class handler(BaseHTTPRequestHandler):
             if islem == "listele":
                 stocks = get_formatted_stocks()
                 html = f"<h2>📋 Stok Listesi</h2><ul>"
-                for app, countries in stocks.items():
-                    html += f"<li><b>{app}</b><ul>"
-                    for c, count in countries.items(): html += f"<li>{c}: {count} numara</li>"
-                    html += "</ul></li>"
+                
+                # DÜZELTME BURADA: Eğer stocks bir sözlük değilse hata mesajı göster.
+                if not isinstance(stocks, dict):
+                    html += f"<li><b>Redis Hatası:</b> {stocks}</li>"
+                else:
+                    for app, countries in stocks.items():
+                        if not isinstance(countries, dict): continue
+                        html += f"<li><b>{app}</b><ul>"
+                        for c, count in countries.items(): 
+                            html += f"<li>{c}: {count} numara</li>"
+                        html += "</ul></li>"
+                        
                 html += f"</ul><br><a href='/admin?key={key}' style='color: #3498db;'>🔙 Geri Dön</a>"
                 self.wfile.write(html.encode('utf-8')); return
                 
@@ -620,7 +627,6 @@ class handler(BaseHTTPRequestHandler):
                         numaralar.append(json.loads(val)['number'])
                         keys_to_delete.append(selected_keys[idx])
                         
-            # ÖNEMLİ: Numaralar kullanıcıya verilmeden ÖNCE stoktan siliniyor!
             if keys_to_delete: redis_pipeline([["DEL", k] for k in keys_to_delete])
             
             self.wfile.write(json.dumps({"durum": "basarili", "verilen_adet": len(numaralar), "numaralar": numaralar}, ensure_ascii=False, indent=4).encode('utf-8'))
