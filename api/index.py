@@ -13,8 +13,8 @@ import secrets
 import time
 
 # YENİ VERİTABANI BİLGİLERİ
-NEW_KV_URL = "https://prime-doberman-77444.upstash.io"
-NEW_KV_TOKEN = "gQAAAAAAAS6EAAIgcDE3Y2Y3ZWQ1NjZkZGE0MmVlODY0ZjkwNmQxMDZmN2U4Mw"
+NEW_KV_URL = "https://full-wildcat-165729.upstash.io"
+NEW_KV_TOKEN = "gQAAAAAAAodhAAIgcDIwNzEwMTkxZjg3ZTc0ODYzOTNlYzMyN2ViZWE3MjE2MQ"
 
 def get_kv_creds():
     return NEW_KV_URL, NEW_KV_TOKEN
@@ -276,6 +276,7 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"hata": "Ücretsiz API kapatılmıştır. Lütfen geçerli bir key kullanın."}).encode('utf-8'))
                 return
             
+            # KEY İSTEK SAYACI
             try: redis_req("INCR", f"api_req_sayaci:{key}")
             except: pass
             try: redis_req("INCR", "api_kullanim_sayaci")
