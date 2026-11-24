@@ -237,6 +237,25 @@ def get_formatted_stocks():
                     except Exception: pass
     return grouped
 
+def check_key_expiry(key):
+    """Key'in süresi dolmuş mu kontrol et."""
+    key_data_str = redis_req("GET", f"api_key:{key}")
+    if not key_data_str:
+        return False, "Geçersiz Key"
+    try:
+        key_data = json.loads(key_data_str)
+        bitis_str = key_data.get("bitis")
+        if bitis_str:
+            bitis = datetime.strptime(bitis_str, "%Y-%m-%d %H:%M:%S")
+            if datetime.now() > bitis:
+                # Süresi dolmuşsa Redis'ten sil
+                redis_req("DEL", f"api_key:{key}")
+                redis_req("DEL", f"api_req_sayaci:{key}")
+                return False, "Key süresi dolmuş!"
+    except Exception:
+        pass
+    return True, "OK"
+
 class handler(BaseHTTPRequestHandler):
     def end_headers(self):
         self.send_header('Access-Control-Allow-Origin', '*')
@@ -273,20 +292,21 @@ class handler(BaseHTTPRequestHandler):
         elif path not in ['/favicon.ico', '/', '/api/index']:
             if not key:
                 self.send_response(401)
-                self.wfile.write(json.dumps({"hata": "Ücretsiz API kapatılmıştır. Lütfen geçerli bir key kullanın."}).encode('utf-8'))
+                self.wfile.write(json.dumps({"hata": "Lütfen geçerli bir API key girin."}).encode('utf-8'))
                 return
             
+            # SÜRE KONTROLÜ BURADA YAPILIYOR
+            is_valid, msg = check_key_expiry(key)
+            if not is_valid:
+                self.send_response(401)
+                self.wfile.write(json.dumps({"hata": msg}).encode('utf-8'))
+                return
+
             # KEY İSTEK SAYACI
             try: redis_req("INCR", f"api_req_sayaci:{key}")
             except: pass
             try: redis_req("INCR", "api_kullanim_sayaci")
             except: pass
-
-            key_data_str = redis_req("GET", f"api_key:{key}")
-            if not key_data_str:
-                self.send_response(401)
-                self.wfile.write(json.dumps({"hata": "Geçersiz veya süresi dolmuş key."}).encode('utf-8'))
-                return
 
         if path == '/favicon.ico':
             self.send_response(200); self.send_header('Content-Type', 'image/x-icon'); self.end_headers(); return
@@ -299,115 +319,42 @@ class handler(BaseHTTPRequestHandler):
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Yxce OTP API</title>
-                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+                <title>Yxce OTP API | Giriş</title>
+                <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
                 <style>
-                    * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-                    body {
-                        background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-                        color: #fff;
-                        min-height: 100vh;
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                        padding: 20px;
-                    }
-                    .container {
-                        background: rgba(255, 255, 255, 0.05);
-                        backdrop-filter: blur(10px);
-                        border: 1px solid rgba(255, 255, 255, 0.1);
-                        border-radius: 20px;
-                        padding: 40px;
-                        max-width: 900px;
-                        width: 100%;
-                        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
-                        animation: fadeIn 1s ease-in-out;
-                    }
-                    @keyframes fadeIn {
-                        from { opacity: 0; transform: translateY(-20px); }
-                        to { opacity: 1; transform: translateY(0); }
-                    }
-                    h1 {
-                        text-align: center;
-                        font-size: 2.5rem;
-                        font-weight: 800;
-                        background: -webkit-linear-gradient(45deg, #00c6ff, #0072ff);
-                        -webkit-background-clip: text;
-                        -webkit-text-fill-color: transparent;
-                        margin-bottom: 10px;
-                    }
-                    .subtitle {
-                        text-align: center;
-                        color: #aaa;
-                        margin-bottom: 30px;
-                        font-size: 0.9rem;
-                    }
-                    .endpoint-card {
-                        background: rgba(255, 255, 255, 0.03);
-                        border-radius: 12px;
-                        padding: 20px;
-                        margin-bottom: 15px;
-                        transition: transform 0.3s ease, background 0.3s ease;
-                    }
-                    .endpoint-card:hover {
-                        transform: translateX(10px);
-                        background: rgba(255, 255, 255, 0.08);
-                    }
-                    .endpoint-title {
-                        color: #00c6ff;
-                        font-size: 1.1rem;
-                        font-weight: 600;
-                        margin-bottom: 8px;
-                        display: flex;
-                        align-items: center;
-                        gap: 10px;
-                    }
-                    code {
-                        background: #121212;
-                        color: #2ecc71;
-                        padding: 12px;
-                        border-radius: 8px;
-                        display: block;
-                        font-family: 'Courier New', monospace;
-                        font-size: 0.9rem;
-                        word-break: break-all;
-                        border-left: 4px solid #00c6ff;
-                    }
-                    .footer {
-                        text-align: center;
-                        margin-top: 30px;
-                        color: #666;
-                        font-size: 0.8rem;
-                    }
+                    * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Plus Jakarta Sans', sans-serif; }
+                    body { background: #050508; color: #fff; min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 20px; overflow: hidden; }
+                    .glow { position: absolute; border-radius: 50%; filter: blur(100px); z-index: 0; opacity: 0.5; }
+                    .glow-1 { width: 400px; height: 400px; background: #7c5cff; top: -100px; left: -100px; }
+                    .glow-2 { width: 400px; height: 400px; background: #00c6ff; bottom: -100px; right: -100px; }
+                    .login-card { width: 100%; max-width: 440px; padding: 50px 40px; background: rgba(15, 15, 25, 0.7); backdrop-filter: blur(24px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 24px; position: relative; z-index: 2; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.8); animation: fadeIn 0.8s cubic-bezier(0.2, 0.8, 0.2, 1); }
+                    @keyframes fadeIn { from { opacity: 0; transform: translateY(40px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+                    h1 { text-align: center; font-size: 38px; font-weight: 800; background: linear-gradient(135deg, #fff, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 10px; }
+                    .subtitle { text-align: center; color: #8888aa; font-size: 14px; margin-bottom: 40px; }
+                    .input-group { margin-bottom: 20px; }
+                    .input-group label { display: block; font-size: 12px; color: #8888aa; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+                    .input-group input { width: 100%; padding: 16px; background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; color: #fff; font-size: 15px; outline: none; transition: 0.2s; }
+                    .input-group input:focus { border-color: #7c5cff; box-shadow: 0 0 0 4px rgba(124, 92, 255, 0.15); }
+                    .btn { width: 100%; padding: 16px; border-radius: 12px; font-weight: 700; font-size: 15px; cursor: pointer; transition: 0.2s; border: none; }
+                    .btn-primary { background: linear-gradient(135deg, #7c5cff, #5a3fd8); color: #fff; box-shadow: 0 6px 20px rgba(124, 92, 255, 0.4); }
+                    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(124, 92, 255, 0.5); }
+                    .footer { text-align: center; margin-top: 30px; font-size: 12px; color: #555577; }
                 </style>
             </head>
             <body>
-                <div class="container">
-                    <h1>🚀 Yxce OTP API</h1>
-                    <p class="subtitle">Sistem aktif ve çalışıyor. Kullanmak için geçerli bir key gereklidir.</p>
-
-                    <div class="endpoint-card">
-                        <div class="endpoint-title">🔥 1. Canlı Trafik</div>
-                        <code>GET /live_trafik?key=KEYINIZ</code>
-                    </div>
-                    <div class="endpoint-card">
-                        <div class="endpoint-title">🔍 2. Kod Sorgulama</div>
-                        <code>GET /kod_sorgula?key=KEYINIZ&numara=905551234567,905551234568</code>
-                    </div>
-                    <div class="endpoint-card">
-                        <div class="endpoint-title">📞 3. Numara Alma</div>
-                        <code>GET /numara_al?key=KEYINIZ&app=WhatsApp&country=Türkiye&adet=5</code>
-                    </div>
-                    <div class="endpoint-card">
-                        <div class="endpoint-title">📊 4. Stok Durumu</div>
-                        <code>GET /stok_durumu?key=KEYINIZ</code>
-                    </div>
-                    <div class="endpoint-card">
-                        <div class="endpoint-title">📩 5. En Son Düşen 10 Kod</div>
-                        <code>GET /kod_cek?key=KEYINIZ</code>
-                    </div>
-
-                    <p class="footer">Yxce OTP API © 2026 | Gelişmiş Güvenlik ve Altyapı</p>
+                <div class="glow glow-1"></div>
+                <div class="glow glow-2"></div>
+                <div class="login-card">
+                    <h1>YXCE OTP</h1>
+                    <p class="subtitle">Premium Doğrulama Servisi</p>
+                    <form action="/stok_durumu" method="GET">
+                        <div class="input-group">
+                            <label>API Key</label>
+                            <input type="text" name="key" placeholder="Keyinizi buraya yapıştırın..." required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Giriş Yap</button>
+                    </form>
+                    <p class="footer">Yxce OTP API © 2026</p>
                 </div>
             </body>
             </html>
@@ -468,21 +415,33 @@ class handler(BaseHTTPRequestHandler):
             except: kullanim_sayisi = 0
             
             html = f"""
-            <html><head><title>OTP Admin Panel</title><meta charset="utf-8"></head>
-            <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #1e1e1e; color: #fff;">
-                <h2>🛠️ Admin Panel</h2>
-                <div style="background: #2a2a2a; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
-                    <h3 style="margin: 0; color: #f1c40f;">📈 Toplam API Kullanımı: {kullanim_sayisi} kez</h3>
+            <html><head><title>OTP Admin Panel</title><meta charset="utf-8">
+            <style>
+                body {{ font-family: 'Plus Jakarta Sans', sans-serif; padding: 40px; background-color: #050508; color: #fff; }}
+                .card {{ background: #0d0d17; padding: 30px; border-radius: 16px; border: 1px solid #22223b; margin-bottom: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }}
+                h2 {{ color: #a78bfa; font-weight: 800; margin-bottom: 20px; font-size: 28px; }}
+                .btn {{ padding: 12px 20px; margin: 5px; border: none; border-radius: 10px; color: white; cursor: pointer; text-decoration: none; display: inline-block; font-weight: 600; transition: 0.2s; font-size: 14px; }}
+                .btn:hover {{ transform: translateY(-2px); }}
+                .btn-blue {{ background: #3498db; }} .btn-green {{ background: #2ecc71; }} .btn-red {{ background: #e74c3c; }} .btn-purple {{ background: #9b59b6; }} .btn-orange {{ background: #e67e22; }}
+                .stat {{ font-size: 20px; color: #f1c40f; font-weight: 700; margin-bottom: 20px; }}
+                hr {{ border-color: #22223b; margin: 20px 0; }}
+            </style>
+            </head>
+            <body>
+                <div class="card">
+                    <h2>🛠️ Admin Paneli</h2>
+                    <div class="stat">📈 Toplam API Kullanımı: {kullanim_sayisi} kez</div>
+                    <hr>
+                    <form action="/admin_islem" method="GET">
+                        <input type="hidden" name="key" value="{key}">
+                        <button type="submit" name="islem" value="listele" class="btn btn-blue">📋 Stok Listesi</button>
+                        <button type="submit" name="islem" value="ekle_sayfa" class="btn btn-green">➕ Stok Ekle</button>
+                        <button type="submit" name="islem" value="sil" class="btn btn-red">🗑️ Tüm Stokları Sil</button>
+                        <hr>
+                        <button type="submit" name="islem" value="key_listele" class="btn btn-purple">🔑 Key Listesini Gör</button>
+                        <button type="submit" name="islem" value="key_olustur_sayfa" class="btn btn-orange">➕ Yeni Key Oluştur</button>
+                    </form>
                 </div>
-                <form action="/admin_islem" method="GET">
-                    <input type="hidden" name="key" value="{key}">
-                    <button type="submit" name="islem" value="listele" style="padding: 10px; margin: 5px; background: #3498db; color: white; border: none; border-radius: 5px;">📋 Stok Listesi</button>
-                    <button type="submit" name="islem" value="ekle_sayfa" style="padding: 10px; margin: 5px; background: #2ecc71; color: white; border: none; border-radius: 5px;">➕ Stok Ekle</button>
-                    <button type="submit" name="islem" value="sil" style="padding: 10px; margin: 5px; background: #e74c3c; color: white; border: none; border-radius: 5px;">🗑️ Tüm Stokları Sil</button>
-                    <hr style="margin: 20px 0; border-color: #333;">
-                    <button type="submit" name="islem" value="key_listele" style="padding: 10px; margin: 5px; background: #9b59b6; color: white; border: none; border-radius: 5px;">🔑 Key Listesini Gör</button>
-                    <button type="submit" name="islem" value="key_olustur_sayfa" style="padding: 10px; margin: 5px; background: #e67e22; color: white; border: none; border-radius: 5px;">➕ Yeni Key Oluştur</button>
-                </form>
             </body></html>
             """
             self.wfile.write(html.encode('utf-8')); return
@@ -491,22 +450,33 @@ class handler(BaseHTTPRequestHandler):
             self.send_response(200); self.send_header('Content-type', 'text/html; charset=utf-8'); self.end_headers()
             islem = query.get('islem', [''])[0]
             
+            style = """
+            <style>
+                body { font-family: 'Plus Jakarta Sans', sans-serif; padding: 40px; background-color: #050508; color: #fff; }
+                .card { background: #0d0d17; padding: 30px; border-radius: 16px; border: 1px solid #22223b; box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-width: 800px; margin: 0 auto; }
+                h2 { color: #a78bfa; font-weight: 800; margin-bottom: 20px; }
+                a { color: #3498db; text-decoration: none; font-weight: 600; }
+                a:hover { text-decoration: underline; }
+                ul { list-style: none; padding: 0; }
+                li { padding: 12px; border-bottom: 1px solid #22223b; display: flex; justify-content: space-between; align-items: center; }
+                li:last-child { border-bottom: none; }
+                .btn { padding: 8px 16px; border-radius: 8px; background: #e74c3c; color: white; text-decoration: none; font-size: 12px; margin-left: 10px; }
+            </style>
+            """
+            
             if islem == "listele":
                 stocks = get_formatted_stocks()
-                html = f"<h2>📋 Stok Listesi</h2><ul>"
-                
-                # DÜZELTME BURADA: Eğer stocks bir sözlük değilse hata mesajı göster.
+                html = f"<html><head>{style}</head><body><div class='card'><h2>📋 Stok Listesi</h2><ul>"
                 if not isinstance(stocks, dict):
                     html += f"<li><b>Redis Hatası:</b> {stocks}</li>"
                 else:
                     for app, countries in stocks.items():
                         if not isinstance(countries, dict): continue
-                        html += f"<li><b>{app}</b><ul>"
+                        html += f"<li><b>{app}</b><ul style='margin-left:20px;'>"
                         for c, count in countries.items(): 
                             html += f"<li>{c}: {count} numara</li>"
                         html += "</ul></li>"
-                        
-                html += f"</ul><br><a href='/admin?key={key}' style='color: #3498db;'>🔙 Geri Dön</a>"
+                html += f"</ul><br><a href='/admin?key={key}'>🔙 Geri Dön</a></div></body></html>"
                 self.wfile.write(html.encode('utf-8')); return
                 
             elif islem == "sil":
@@ -514,34 +484,34 @@ class handler(BaseHTTPRequestHandler):
                 if keys:
                     commands = [["DEL", k] for k in keys]
                     redis_pipeline(commands)
-                self.wfile.write(f"<h2>🗑️ Tüm Stoklar Silindi!</h2><br><a href='/admin?key={key}' style='color: #3498db;'>🔙 Geri Dön</a>".encode('utf-8')); return
+                self.wfile.write(f"<html><head>{style}</head><body><div class='card'><h2 style='color:#e74c3c;'>🗑️ Tüm Stoklar Silindi!</h2><br><a href='/admin?key={key}'>🔙 Geri Dön</a></div></body></html>".encode('utf-8')); return
                 
             elif islem == "ekle_sayfa":
                 html = f"""
-                <html><head><title>Stok Ekle</title><meta charset="utf-8"></head>
-                <body style="font-family: Arial; padding: 20px; background-color: #1e1e1e; color: #fff;">
+                <html><head>{style}</head><body>
+                <div class='card'>
                 <h2>➕ Stok Ekle (Dosya ile)</h2>
-                <form action="/dosya_yukle_islem" method="POST" enctype="multipart/form-data">
+                <form action="/dosya_yukle_islem" method="POST" enctype="multipart/form-data" style="display:flex; flex-direction:column; gap:15px;">
                     <input type="hidden" name="key" value="{key}">
-                    <label>Uygulama Seçin:</label><br>
-                    <select name="app" style="padding: 5px;">
+                    <label>Uygulama Seçin:</label>
+                    <select name="app" style="padding: 12px; background: rgba(0,0,0,0.4); border: 1px solid #22223b; color: #fff; border-radius: 8px; font-size: 15px;">
                 """
                 for u in UYGULAMALAR: html += f"<option value='{u}'>{u}</option>"
                 html += f"""
-                    </select><br><br>
-                    <label>Numara Listesi (.txt) Seçin:</label><br>
-                    <input type="file" name="dosya" accept=".txt"><br><br>
-                    <button type="submit" style="padding: 10px 20px; background: #2ecc71; color: white; border: none; border-radius: 5px;">Dosyayı Yükle ve Ekle</button>
+                    </select>
+                    <label>Numara Listesi (.txt) Seçin:</label>
+                    <input type="file" name="dosya" accept=".txt" style="padding: 10px; background: rgba(0,0,0,0.4); border-radius: 8px;">
+                    <button type="submit" style="padding: 14px; background: #2ecc71; color: white; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 15px;">Dosyayı Yükle ve Ekle</button>
                 </form>
-                <br><a href='/admin?key={key}' style='color: #3498db;'>🔙 Geri Dön</a>
-                </body></html>
+                <br><a href='/admin?key={key}'>🔙 Geri Dön</a>
+                </div></body></html>
                 """
                 self.wfile.write(html.encode('utf-8')); return
                 
             elif islem == "key_listele":
                 keys = redis_req("SCAN", "0", "MATCH", "api_key:*", "COUNT", "1000")
                 key_list = keys[1] if keys and len(keys) > 1 else []
-                html = "<h2>🔑 Key Listesi ve İstek Sayıları</h2><ul>"
+                html = f"<html><head>{style}</head><body><div class='card'><h2>🔑 Key Listesi ve İstek Sayıları</h2><ul>"
                 for k in key_list:
                     k_val = redis_req("GET", k)
                     k_name = k.replace('api_key:', '')
@@ -552,9 +522,9 @@ class handler(BaseHTTPRequestHandler):
                     if k_val:
                         try:
                             data = json.loads(k_val)
-                            html += f"<li><b>{k_name}</b> - İstek: {req_count} - Bitiş: {data.get('bitis', 'Bilinmiyor')} <a href='/admin_islem?islem=key_sil&key={key}&hedef={k_name}'>[SİL]</a></li>"
+                            html += f"<li><div><b>{k_name}</b><br><small style='color:#8888aa;'>İstek: {req_count} | Bitiş: {data.get('bitis', 'Bilinmiyor')}</small></div><a href='/admin_islem?islem=key_sil&key={key}&hedef={k_name}' class='btn'>SİL</a></li>"
                         except Exception: pass
-                html += f"</ul><br><a href='/admin?key={key}'>🔙 Geri Dön</a>"
+                html += f"</ul><br><a href='/admin?key={key}'>🔙 Geri Dön</a></div></body></html>"
                 self.wfile.write(html.encode('utf-8')); return
                 
             elif islem == "key_sil":
@@ -562,22 +532,26 @@ class handler(BaseHTTPRequestHandler):
                 if hedef:
                     redis_req("DEL", f"api_key:{hedef}")
                     redis_req("DEL", f"api_req_sayaci:{hedef}")
-                    self.wfile.write(f"<h2>🗑️ Key Silindi!</h2><br><a href='/admin_islem?islem=key_listele&key={key}'>🔙 Geri Dön</a>".encode('utf-8'))
+                    self.wfile.write(f"<html><head>{style}</head><body><div class='card'><h2 style='color:#e74c3c;'>🗑️ Key Silindi!</h2><br><a href='/admin_islem?islem=key_listele&key={key}'>🔙 Geri Dön</a></div></body></html>".encode('utf-8'))
                 return
                 
             elif islem == "key_olustur_sayfa":
                 html = f"""
-                <html><body style='background: #1e1e1e; color: #fff; padding: 20px;'>
+                <html><head>{style}</head><body>
+                <div class='card'>
                 <h2>➕ Yeni Key Oluştur</h2>
-                <form action="/admin_islem" method="GET">
+                <form action="/admin_islem" method="GET" style="display:flex; flex-direction:column; gap:15px;">
                     <input type="hidden" name="key" value="{key}">
                     <input type="hidden" name="islem" value="key_olustur">
-                    <label>Saat:</label> <input type="number" name="saat" value="0" style="width: 50px;">
-                    <label>Gün:</label> <input type="number" name="gun" value="0" style="width: 50px;">
-                    <label>Ay:</label> <input type="number" name="ay" value="0" style="width: 50px;"><br><br>
-                    <button type="submit" style="padding: 10px 20px; background: #2ecc71; color: white; border: none; border-radius: 5px;">Oluştur</button>
+                    <div style="display:flex; gap:10px;">
+                        <div style="flex:1;"><label>Saat:</label><br><input type="number" name="saat" value="0" style="width:100%; padding:10px; background:rgba(0,0,0,0.4); border:1px solid #22223b; color:#fff; border-radius:8px;"></div>
+                        <div style="flex:1;"><label>Gün:</label><br><input type="number" name="gun" value="0" style="width:100%; padding:10px; background:rgba(0,0,0,0.4); border:1px solid #22223b; color:#fff; border-radius:8px;"></div>
+                        <div style="flex:1;"><label>Ay:</label><br><input type="number" name="ay" value="0" style="width:100%; padding:10px; background:rgba(0,0,0,0.4); border:1px solid #22223b; color:#fff; border-radius:8px;"></div>
+                    </div>
+                    <button type="submit" style="padding:14px; background:#2ecc71; color:white; border:none; border-radius:8px; font-weight:700; cursor:pointer; margin-top:10px;">Oluştur</button>
                 </form>
-                <br><a href='/admin?key={key}'>🔙 Geri Dön</a></body></html>
+                <br><a href='/admin?key={key}'>🔙 Geri Dön</a>
+                </div></body></html>
                 """
                 self.wfile.write(html.encode('utf-8')); return
                 
@@ -586,10 +560,10 @@ class handler(BaseHTTPRequestHandler):
                 yeni_key = secrets.token_hex(16)
                 toplam_saniye = (saat * 3600) + (gun * 86400) + (ay * 2592000)
                 if toplam_saniye <= 0:
-                    self.wfile.write(f"<h2 style='color:red;'>Hata: Geçerli bir süre girin!</h2><br><a href='/admin?key={key}'>🔙 Geri Dön</a>".encode('utf-8')); return
+                    self.wfile.write(f"<html><head>{style}</head><body><div class='card'><h2 style='color:red;'>Hata: Geçerli bir süre girin!</h2><br><a href='/admin?key={key}'>🔙 Geri Dön</a></div></body></html>".encode('utf-8')); return
                 bitis = (datetime.now() + timedelta(seconds=toplam_saniye)).strftime("%Y-%m-%d %H:%M:%S")
                 redis_req("SET", f"api_key:{yeni_key}", json.dumps({"sure": toplam_saniye, "bitis": bitis}))
-                self.wfile.write(f"<h2 style='color:green;'>✅ Key Oluşturuldu!</h2><p><b>KEY: {yeni_key}</b></p><br><a href='/admin_islem?islem=key_listele&key={key}'>🔙 Listeye Dön</a>".encode('utf-8')); return
+                self.wfile.write(f"<html><head>{style}</head><body><div class='card'><h2 style='color:#2ecc71;'>✅ Key Oluşturuldu!</h2><p style='font-size:20px; margin:20px 0;'><b>{yeni_key}</b></p><br><a href='/admin_islem?islem=key_listele&key={key}'>🔙 Listeye Dön</a></div></body></html>".encode('utf-8')); return
 
         if path == '/stok_durumu':
             self.send_response(200); self.send_header('Content-type', 'application/json; charset=utf-8'); self.end_headers()
