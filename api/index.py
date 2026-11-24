@@ -13,8 +13,8 @@ import secrets
 import time
 
 # YENİ VERİTABANI BİLGİLERİ
-NEW_KV_URL = "https://full-wildcat-165729.upstash.io"
-NEW_KV_TOKEN = "gQAAAAAAAodhAAIgcDIwNzEwMTkxZjg3ZTc0ODYzOTNlYzMyN2ViZWE3MjE2MQ"
+NEW_KV_URL = "https://suited-monitor-196412.upstash.io"
+NEW_KV_TOKEN = "gQAAAAAAAv88AAIgcDFhNDIzOWMyMjE0NTg0ZTI5YmY0OWEyYzU4YTZlN2IzNw"
 
 def get_kv_creds():
     return NEW_KV_URL, NEW_KV_TOKEN
