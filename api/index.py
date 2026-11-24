@@ -312,6 +312,67 @@ class handler(BaseHTTPRequestHandler):
             self.send_response(200); self.send_header('Content-Type', 'image/x-icon'); self.end_headers(); return
 
         if path == '/' or path == '/api/index':
+            # Eğer key parametresi varsa ve doğruysa Dashboard göster, yoksa Giriş Ekranı
+            if key and not path.startswith('/admin'):
+                is_valid, msg = check_key_expiry(key)
+                if is_valid:
+                    # DASHBOARD EKRANI
+                    html = f"""
+                    <!DOCTYPE html>
+                    <html lang="tr">
+                    <head>
+                        <meta charset="UTF-8">
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                        <title>Yxce OTP API | Panel</title>
+                        <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+                        <style>
+                            * {{ margin: 0; padding: 0; box-sizing: border-box; font-family: 'Plus Jakarta Sans', sans-serif; }}
+                            body {{ background: #050508; color: #fff; min-height: 100vh; padding: 40px 20px; }}
+                            .container {{ max-width: 900px; margin: 0 auto; }}
+                            .header {{ text-align: center; margin-bottom: 40px; }}
+                            h1 {{ font-size: 32px; font-weight: 800; background: linear-gradient(135deg, #fff, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 10px; }}
+                            .subtitle {{ color: #8888aa; font-size: 14px; }}
+                            .endpoint-card {{ background: rgba(15, 15, 25, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 24px; margin-bottom: 16px; transition: transform 0.2s; }}
+                            .endpoint-card:hover {{ transform: translateY(-2px); border-color: rgba(124,92,255,0.4); }}
+                            .endpoint-title {{ color: #a78bfa; font-size: 16px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }}
+                            code {{ background: rgba(0,0,0,0.5); color: #2ecc71; padding: 14px; border-radius: 10px; display: block; font-family: 'Courier New', monospace; font-size: 13px; word-break: break-all; border-left: 4px solid #7c5cff; }}
+                            .footer {{ text-align: center; margin-top: 40px; color: #555577; font-size: 12px; }}
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="header">
+                                <h1>🚀 Yxce OTP API</h1>
+                                <p class="subtitle">Sistem aktif. Keyiniz doğrulandı.</p>
+                            </div>
+                            <div class="endpoint-card">
+                                <div class="endpoint-title">🔥 1. Canlı Trafik</div>
+                                <code>GET /live_trafik?key={key}</code>
+                            </div>
+                            <div class="endpoint-card">
+                                <div class="endpoint-title">🔍 2. Kod Sorgulama</div>
+                                <code>GET /kod_sorgula?key={key}&numara=905551234567,905551234568</code>
+                            </div>
+                            <div class="endpoint-card">
+                                <div class="endpoint-title">📞 3. Numara Alma</div>
+                                <code>GET /numara_al?key={key}&app=WhatsApp&country=Türkiye&adet=5</code>
+                            </div>
+                            <div class="endpoint-card">
+                                <div class="endpoint-title">📊 4. Stok Durumu</div>
+                                <code>GET /stok_durumu?key={key}</code>
+                            </div>
+                            <div class="endpoint-card">
+                                <div class="endpoint-title">📩 5. En Son Düşen 10 Kod</div>
+                                <code>GET /kod_cek?key={key}</code>
+                            </div>
+                            <p class="footer">Yxce OTP API © 2026</p>
+                        </div>
+                    </body>
+                    </html>
+                    """
+                    self.wfile.write(html.encode('utf-8')); return
+
+            # GİRİŞ EKRANI
             self.send_response(200); self.send_header('Content-type', 'text/html; charset=utf-8'); self.end_headers()
             html = """
             <!DOCTYPE html>
@@ -347,7 +408,7 @@ class handler(BaseHTTPRequestHandler):
                 <div class="login-card">
                     <h1>YXCE OTP</h1>
                     <p class="subtitle">Premium Doğrulama Servisi</p>
-                    <form action="/stok_durumu" method="GET">
+                    <form action="/" method="GET">
                         <div class="input-group">
                             <label>API Key</label>
                             <input type="text" name="key" placeholder="Keyinizi buraya yapıştırın..." required>
