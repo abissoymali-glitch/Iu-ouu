@@ -12,9 +12,9 @@ from concurrent.futures import ThreadPoolExecutor
 import secrets
 import time
 
-# YENİ VERİTABANI BİLGİLERİ
-NEW_KV_URL = "https://suited-monitor-196412.upstash.io"
-NEW_KV_TOKEN = "gQAAAAAAAv88AAIgcDFhNDIzOWMyMjE0NTg0ZTI5YmY0OWEyYzU4YTZlN2IzNw"
+# ==================== YENİ VERİTABANI BİLGİLERİ ====================
+NEW_KV_URL = "https://settling-fox-222439.upstash.io"
+NEW_KV_TOKEN = "gQAAAAAAA2TnAAIgcDE2ZjY0NjZjNWU2YTU0NGQ0ODUzZmM1OTA4OWY3MWUxNA"
 
 def get_kv_creds():
     return NEW_KV_URL, NEW_KV_TOKEN
@@ -400,7 +400,8 @@ class handler(BaseHTTPRequestHandler):
                     .login-card { width: 100%; max-width: 440px; padding: 50px 40px; background: rgba(15, 15, 25, 0.7); backdrop-filter: blur(24px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 24px; position: relative; z-index: 2; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.8); animation: fadeIn 0.8s cubic-bezier(0.2, 0.8, 0.2, 1); }
                     @keyframes fadeIn { from { opacity: 0; transform: translateY(40px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
                     h1 { text-align: center; font-size: 38px; font-weight: 800; background: linear-gradient(135deg, #fff, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 10px; }
-                    .subtitle { text-align: center; color: #8888aa; font-size: 14px; margin-bottom: 40px; }
+                    .subtitle { text-align: center; color: #8888aa; font-size: 14px; margin-bottom: 20px; }
+                    .info-box { background: rgba(124, 92, 255, 0.1); border: 1px solid rgba(124, 92, 255, 0.2); padding: 15px; border-radius: 12px; margin-bottom: 25px; font-size: 13px; color: #ccc; line-height: 1.5; }
                     .input-group { margin-bottom: 20px; }
                     .input-group label { display: block; font-size: 12px; color: #8888aa; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
                     .input-group input { width: 100%; padding: 16px; background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; color: #fff; font-size: 15px; outline: none; transition: 0.2s; }
@@ -417,6 +418,12 @@ class handler(BaseHTTPRequestHandler):
                 <div class="login-card">
                     <h1>YXCE OTP</h1>
                     <p class="subtitle">Premium Doğrulama Servisi</p>
+                    
+                    <div class="info-box">
+                        <b>API Hakkında:</b><br>
+                        Yxce OTP API, çeşitli uygulamalar için sanal numara alma, gelen kodları sorgulama ve canlı trafik verilerini çekme gibi işlemleri tek bir noktadan yönetmenizi sağlar. Sisteme giriş yapabilmek için geçerli bir API Key'e ihtiyacınız vardır.
+                    </div>
+
                     <form action="/dashboard" method="GET">
                         <div class="input-group">
                             <label>API Key</label>
@@ -737,4 +744,4 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(f"<h2 style='color:green;'>✅ {len(valid_nums)} numara başarıyla eklendi.</h2><br><a href='/admin?key={ADMIN_KEY}'>🔙 Geri Dön</a>".encode('utf-8'))
             else:
                 self.wfile.write(f"<h2 style='color:red;'>❌ Dosya okunamadı veya boş.</h2><br><a href='/admin?key={ADMIN_KEY}'>🔙 Geri Dön</a>".encode('utf-8'))
-            return
+            return 
